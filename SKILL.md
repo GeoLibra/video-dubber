@@ -1,13 +1,9 @@
 ---
 name: video-dubber
 description: >
-  YouTube/Bilibili/Twitter/X/TikTok/本地视频多语言配音与字幕翻译工具。每当用户要“翻译视频、加中文字幕、
-  中文配音、克隆音色、voice clone、dubbing、替换音轨、保持字幕同步、生成带硬字幕视频”时使用。
-  该 skill 使用 yt-dlp 下载 YouTube、Bilibili、Twitter/X、TikTok 等站点视频，或读取本地视频，
-  ASR、分批翻译到中文/日语/韩语等目标语言、支持参考音频音色克隆，
-  支持“只下载/只加字幕/不要克隆声音”的原声硬字幕路径，也支持按语义段生成并对齐 TTS，
-  支持目标语言单语或双语硬字幕，使用固定字体样式烧录字幕，
-  最后导出并验证新视频。默认目标语言是中文。
+  视频下载、字幕翻译、硬字幕烧录和可选声音克隆配音工具。用户要下载 YouTube/Bilibili/Twitter/X/TikTok
+  或本地视频、生成中文/日语/韩语等字幕、保留原声只加字幕、或根据原视频/参考音频克隆声音生成配音视频时使用。
+  默认目标语言是中文；克隆配音时要保持字幕、语音和原视频时间轴同步。
 allowed-tools:
   - Read
   - Write
@@ -147,7 +143,7 @@ python .agents/skills/video-dubber/scripts/run_pipeline.py \
 - ASR/TTS 硬件路由要先做 10-15 秒 smoke test：
   - macOS 上 `whisper-cli` 先试 `--no-gpu`。如果默认 Metal 加载后崩溃，不要反复重跑默认命令，直接固定 CPU ASR。
   - MLX/F5 需要 Metal；沙箱或 headless 环境可能报 `No Metal device available`，这时必须用允许访问 Metal 的外部执行方式跑 TTS。
-  - 只有确认有 `NVIDIA_API_KEY`、Riva/gRPC 依赖和可达服务时才走 NVIDIA ASR；没有服务端时不要把“NVIDIA 云转写”当作默认可用路径。
+  - 有 `NVIDIA_API_KEY` 时优先走 NVIDIA Riva gRPC ASR；如果 API、依赖或服务不可用，再回退本地 ASR。
 
 ### 2. 输入准备
 
@@ -191,7 +187,7 @@ YouTube 高清下载策略：
 ### 3. ASR
 
 默认云端优先：
-1. 有 `NVIDIA_API_KEY` 时尝试 Riva gRPC。
+1. 有 `NVIDIA_API_KEY` 时优先尝试 NVIDIA Riva gRPC（`grpc.nvcf.nvidia.com:443`，function-id `b702f636-f60c-4a3d-a6f4-f3568c13bd7d`）。
 2. 失败后降级本地：`whisper-cli + --whisper-model` 或 `faster-whisper`。
 
 本地 ASR 路由：

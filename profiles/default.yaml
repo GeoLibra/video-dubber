@@ -3,7 +3,7 @@
 
 general:
   target_language: Chinese
-  source_lang: en-US
+  source_lang: en
   subtitle_mode: target
   min_free_gb: 2.0
   font_file: null  # null = 使用内置字体

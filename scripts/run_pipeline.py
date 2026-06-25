@@ -74,7 +74,7 @@ def parse_args():
     parser.add_argument("--model-config", default=None)
     parser.add_argument("--profile", default=None, help="Path to YAML profile override.")
     parser.add_argument("--target-language", default="Chinese")
-    parser.add_argument("--source-lang", default="en-US")
+    parser.add_argument("--source-lang", default="en")
     parser.add_argument("--translation-model", default="gemini-3.5-flash")
     parser.add_argument("--translation-batch-size", type=int, default=25)
     parser.add_argument("--confirm-translation", action="store_true")
@@ -173,10 +173,14 @@ def main():
         meter.log_audio(video_duration_s / 60.0)
         meter.phase_end()
 
-        meter.phase_start("audio_separation")
-        update_status(args.status, "running", "separating audio", stage="audio_separation")
-        vocals_path, no_vocals_path = separate_audio(audio_path, job_dir, args.skip_separation)
-        meter.phase_end()
+        if args.tts_engine == "none":
+            vocals_path, no_vocals_path = audio_path, None
+            log("Subtitle-only mode: skip audio separation and TTS preparation.", "AUDIO")
+        else:
+            meter.phase_start("audio_separation")
+            update_status(args.status, "running", "separating audio", stage="audio_separation")
+            vocals_path, no_vocals_path = separate_audio(audio_path, job_dir, args.skip_separation)
+            meter.phase_end()
 
         meter.phase_start("asr")
         update_status(args.status, "running", "transcribing", stage="asr")
@@ -200,12 +204,6 @@ def main():
                 subtitle_count=total_subs,
             )
             sys.exit(0)
-
-        meter.phase_start("reference")
-        update_status(args.status, "running", "preparing reference audio", stage="reference")
-        ref_audio_path, ref_text = prepare_reference_audio(subs, vocals_path, job_dir, args)
-        log(f"Reference text: {ref_text}", "REF_TEXT")
-        meter.phase_end()
 
         meter.phase_start("translation")
         update_status(args.status, "running", "translating", stage="translation")
@@ -241,14 +239,24 @@ def main():
             sys.exit(0)
         meter.phase_end()
 
-        meter.phase_start("tts")
-        update_status(args.status, "running", "generating aligned tts", stage="tts")
-        tts_audio, tts_report = generate_and_merge(
-            subs_translated, job_dir, ref_audio_path, ref_text, video_duration_s, args
-        )
-        tts_chars = sum(len(item.get("text", "")) for item in tts_report)
-        meter.log_tts(tts_chars)
-        meter.phase_end()
+        if args.tts_engine == "none":
+            tts_audio, tts_report = None, []
+            log("Subtitle-only mode: skip reference audio and voice cloning.", "TTS")
+        else:
+            meter.phase_start("reference")
+            update_status(args.status, "running", "preparing reference audio", stage="reference")
+            ref_audio_path, ref_text = prepare_reference_audio(subs, vocals_path, job_dir, args)
+            log(f"Reference text: {ref_text}", "REF_TEXT")
+            meter.phase_end()
+
+            meter.phase_start("tts")
+            update_status(args.status, "running", "generating aligned tts", stage="tts")
+            tts_audio, tts_report = generate_and_merge(
+                subs_translated, job_dir, ref_audio_path, ref_text, video_duration_s, args
+            )
+            tts_chars = sum(len(item.get("text", "")) for item in tts_report)
+            meter.log_tts(tts_chars)
+            meter.phase_end()
 
         if args.preserve_gap_audio and not no_vocals_path:
             tts_audio = add_gap_audio(tts_audio, audio_path, subs_translated, job_dir, video_duration_s, args)

@@ -1,92 +1,129 @@
 # Video Dubber
 
-Video Dubber 是一个强大的自动化视频多语言配音与字幕翻译工具，支持将 YouTube 等平台的视频，或者本地视频，自动翻译并生成带中文字幕和高质量中文克隆配音（或日语/韩语等目标语言）的视频。
+Video Dubber 是一个视频下载、字幕翻译、硬字幕生成和可选声音克隆配音的 skill。它可以处理在线视频或本地视频，输出保留原声的字幕版，也可以根据原视频或参考音频生成目标语言配音版。
 
-## 核心能力 (Features)
+[English README](README_EN.md)
 
-- **广泛的平台支持**：支持下载 YouTube 等站点的视频，也支持处理本地 `.mp4` 视频。
-- **高质量语音转写 (ASR)**：优先支持 NVIDIA Riva 高精度云端语音识别（带词级时间戳），支持回退到本地 Whisper（支持 Apple Silicon/Mac MLX 硬件加速或 NVIDIA GPU/faster-whisper）。
-- **智能语义翻译与对齐**：使用大语言模型（如 Gemini 3.5 Flash）进行上下文感知的智能翻译。独创的自适应语义换行与对齐策略，确保生成的配音（TTS）和画面字幕精准同步。
-- **零样本声音克隆 (Voice Cloning)**：支持通过 F5-TTS 进行高质量的声音克隆，保留原说话人的音色。自动处理背景噪音并恢复无语音间隙的背景音 (Gap Audio Preservation)。
-- **高度可定制的硬字幕**：支持原音单语字幕、原音双语字幕、配音单语字幕等多种模式。自带固定规范的高清字体渲染配置。
-- **断点续传与长任务稳定**：核心环节全量缓存（下载、ASR、翻译、分段 TTS Chunk 等），支持意外中断后安全续跑。
+## 功能
 
-## 安装方法 (Installation)
+| 场景 | 结果 |
+| --- | --- |
+| 只下载视频 | 保存原视频 |
+| 翻译字幕，保留原声 | 输出带硬字幕的视频 |
+| 翻译字幕 + 克隆配音 | 输出目标语言配音视频 |
+| 本地视频翻译 | 直接处理本地视频文件 |
+| 指定参考音频 | 用参考声音生成配音 |
 
-```bash
-npx skills add /path/to/agent-playbook/video-dubber -a opencode -a claude-code -a codex -g
+默认目标语言是中文，也可以指定日语、韩语等语言。
+
+## 特点
+
+| 特点 | 说明 |
+| --- | --- |
+| 任务可续跑 | 长视频任务中断后，可以用同一个任务目录继续，已完成的下载、字幕、翻译和配音片段会尽量复用。这里指整体任务续跑，不是单纯的下载断点续传。 |
+| 节省 token | 翻译只传字幕编号和文本，不把完整时间轴反复发给模型；已翻译内容会缓存，重跑时只补缺失部分。 |
+| 心跳监控 | 长时间翻译、配音或合成时，任务会记录阶段进度，方便发现卡住的阶段并继续处理。 |
+| 平台字幕优先 | 有平台自带字幕时优先使用，减少转写时间和错误。 |
+| NVIDIA Riva 优先 | 配置 `NVIDIA_API_KEY` 后，音频转字幕会优先使用 NVIDIA Riva gRPC ASR；不可用时再回退本地 Whisper。 |
+| 原声/配音分离 | 可以只做原声硬字幕，也可以生成克隆配音；不需要配音时不会跑声音克隆流程。 |
+| 输出可验证 | 每次生成后会写验证报告，记录视频时长、字幕数量和配音生成状态。 |
+
+## 整体流程
+
+```mermaid
+flowchart TD
+    A["输入视频链接或本地视频"] --> B{"只下载？"}
+    B -->|是| C["保存原视频"]
+    B -->|否| D["获取源字幕或转写音频"]
+    D --> E["翻译成目标语言"]
+    E --> F{"需要克隆配音？"}
+    F -->|否| G["保留原声并烧录字幕"]
+    F -->|是| H["准备原视频声音或参考音频"]
+    H --> I["生成目标语言配音"]
+    I --> J["合成配音和字幕"]
+    G --> K["输出原声字幕版"]
+    J --> L["输出克隆配音版"]
+    K --> M["生成验证报告"]
+    L --> M
 ```
 
-安装后 Agent 会自动处理 Python 依赖。需要前置安装的依赖：
+## 安装
 
-- **FFmpeg**（必需）：`brew install ffmpeg`
-- **Node.js**（用于 `npx`）：`brew install node`
+在支持 skills 的工具中安装：
 
-## 翻译模型配置 (Translation Model)
+```bash
+npx skills add <video-dubber目录> -a codex -g
+```
 
-复制 `.env.example` 为 `.env`，填入任一 API key 即可自动生效：
+例如：
+
+```bash
+npx skills add ./video-dubber -a codex -g
+```
+
+安装后，Agent 会按任务需要检查并准备运行环境。
+
+## 配置(可选)
+
+不配置 `.env` 时，Agent 仍然可以下载视频、处理本地视频、使用已有字幕，或在没有 API key 时接手翻译。
+
+建议为长视频配置单独的翻译模型。视频字幕通常很多，整片翻译会消耗较多 token；把字幕翻译交给便宜、速度快的模型，可以降低成本，也能避免占用主 Agent 的上下文。
+
+如果要让脚本自动调用翻译模型或 NVIDIA Riva，在这个 skill 目录中找到 `.env.example`，复制成 `.env` 后填入需要的 key：
 
 ```bash
 cp .env.example .env
-# 编辑 .env 填入 GEMINI_API_KEY 或 OPENAI_API_KEY 等
+
+# 用于字幕翻译
+GEMINI_API_KEY=...
+
+# 可选：用于 NVIDIA Riva 语音转字幕
+NVIDIA_API_KEY=...
 ```
 
-脚本会自动检测已配置的 key，按 `model-config.yaml` 中的顺序选择对应模型。同时设置多个 key 时排在前面的优先。
+NVIDIA API key 可在 [NVIDIA Build Models](https://build.nvidia.com/models) 获取。
 
-如需切换或强制指定模型，使用 `--translation-model`：
+`model-config.yaml` 用来配置翻译模型的选择、模型名称和 API 地址。通常只需要填 `.env`；只有要切换翻译服务商、启用 NVIDIA 托管模型或调整 API 地址时，才需要改 `model-config.yaml`。
 
-```bash
-python scripts/run_pipeline.py --translation-model openai ...
+`NVIDIA_API_KEY` 可以同时用于 NVIDIA Riva 语音转字幕和 NVIDIA 托管的翻译模型。但翻译是否走 NVIDIA，取决于是否启用了 `model-config.yaml` 里的 NVIDIA 翻译模型配置；只填写 `NVIDIA_API_KEY` 不会自动把翻译模型切到 NVIDIA。
+
+NVIDIA Riva 在这里用于 ASR，也就是把原视频语音转成带时间轴的源字幕。后续字幕翻译仍由配置的翻译模型完成，这样可以保留字幕时间轴并支持多种目标语言。
+
+如果视频平台需要登录态，例如 Bilibili、Twitter/X、Instagram、部分 YouTube 视频，可以告诉 Agent 使用浏览器 cookies。
+
+## 使用方式
+
+安装后直接用自然语言告诉 Agent 你想要什么。
+
+| 输入 | Agent 应该做 |
+| --- | --- |
+| 下载这个视频：`https://...` | 只下载视频 |
+| 把这个视频翻译成中文字幕，保留原声 | 生成中文字幕硬字幕版 |
+| 把这个英文视频翻译成中文，并用原说话人的声音配音 | 生成中文字幕 + 中文克隆配音版 |
+| 给这个本地视频加日语字幕：`/path/to/video.mp4` | 处理本地视频并输出日语字幕版 |
+| 用 `reference.wav` 这个声音，给 `video.mp4` 生成中文配音版 | 使用参考音频克隆指定声音 |
+| 继续刚才中断的任务 | 使用同一个任务目录续跑，尽量复用已完成的下载、字幕、翻译和配音片段 |
+
+## 输出文件
+
+常见输出包括：
+
+```text
+output_original_<lang>_<mode>.mp4   # 原声 + 字幕
+output_cloned_<lang>_<mode>.mp4     # 克隆配音 + 字幕
+verification_report_<lang>_<mode>.json
 ```
 
-> 当前翻译请求由脚本直连配置的 API 完成。若希望使用 Agent 自身的模型（如 Claude CLI 的 Claude），需在 `.env` 中配置对应 API key。
+`verification_report` 用来确认输出视频时长、字幕数量和配音生成状态。
 
-## 工作流程
+## 常用说法
 
-```mermaid
-flowchart TB
-    subgraph Input[输入]
-        A[环境预检<br/>ffmpeg / yt-dlp / 字体 / 磁盘] --> B{输入类型}
-        B -->|URL| C[yt-dlp 下载视频<br/>并提取 16k mono WAV]
-        B -->|--input-video| D[读取本地视频]
-        C --> E{已有平台字幕？}
-        D --> E
-        E -->|是| F[选取最干净字幕轨道]
-        E -->|否| G[ASR 语音转写]
-        G --> H{NVIDIA_API_KEY？}
-        H -->|是| I[NVIDIA Riva 云端转写]
-        H -->|否| J[本地 Whisper 转写<br/>Apple Silicon / CPU]
-        I --> K
-        J --> K
-        F --> K
-    end
-
-    subgraph Translate[翻译]
-        K[源字幕 SRT] --> L[分批 LLM 翻译<br/>model-config.yaml]
-        L --> M[缓存 translations_&lt;lang&gt;.json]
-        M --> N{克隆配音？}
-    end
-
-    subgraph SubOnly[字幕-only 路径]
-        N -->|否| O[生成 ASS 字幕<br/>自适应语义换行]
-        O --> P[FFmpeg 硬字幕烧录<br/>保留原音轨]
-    end
-
-    subgraph FullClone[完整克隆路径]
-        N -->|是| Q[参考音频准备<br/>用户提供 / 自动抽取]
-        Q --> R[语义段合并<br/>strict sync]
-        R --> S[F5-TTS 语音克隆<br/>逐段生成 + 缓存]
-        S --> T[TTS 时间轴对齐<br/>atempo 适配]
-        T --> U[风险段补丁<br/>缩短文本 / 局部重生]
-        U --> V[Gap Audio 恢复<br/>保留背景音乐/环境声]
-        V --> W[合并完整 TTS 音轨]
-        W --> X[FFmpeg 烧录<br/>克隆配音 + 字幕]
-    end
-
-    subgraph Output[输出]
-        P --> Y[output_original_*]
-        X --> Z[output_cloned_*]
-        Y --> AA[验证报告<br/>时长 / 字幕 / TTS 质量]
-        Z --> AA
-    end
-```
+| 需求 | 可以这样说 |
+| --- | --- |
+| 只要目标语言字幕 | “只显示中文字幕” |
+| 双语字幕 | “做成中英双语字幕” |
+| 不要克隆声音 | “保留原声，不要配音” |
+| 指定语言 | “翻译成日语/韩语/中文” |
+| 使用登录态 | “用 Chrome cookies 下载” |
+| 处理播放列表 | “下载第 1 到第 10 个视频” |
+| 自动识别源语言 | “源语言自动识别” |

@@ -8,7 +8,14 @@ from .media import FFMPEG, run
 from .source_loader import find_platform_subtitle
 
 
-def transcribe_audio_riva(audio_path, source_lang="en-US", config_type="word_time"):
+def _normalize_riva_language_code(source_lang):
+    lang = (source_lang or "en").strip()
+    if lang.lower() == "multi":
+        return "multi"
+    return lang.split("-", 1)[0].lower()
+
+
+def transcribe_audio_riva(audio_path, source_lang="en", config_type="word_time"):
     if not os.environ.get("NVIDIA_API_KEY"):
         raise RuntimeError("NVIDIA_API_KEY is missing")
 
@@ -28,7 +35,7 @@ def transcribe_audio_riva(audio_path, source_lang="en-US", config_type="word_tim
     )
     service = riva.client.ASRService(auth)
     config = riva.client.RecognitionConfig(
-        language_code=source_lang,
+        language_code=_normalize_riva_language_code(source_lang),
         max_alternatives=1,
         enable_automatic_punctuation=True,
         enable_word_time_offsets=config_type == "word_time",
