@@ -1,0 +1,10 @@
+# PyTorch F5-TTS route used as a fallback or on non-MLX machines.
+# This is intentionally separate because torch/model caches are large.
+numpy<2
+torch
+torchaudio
+torchcodec
+f5-tts==1.0.8
+cached_path
+soundfile
+pysubs2

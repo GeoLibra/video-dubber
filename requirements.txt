@@ -1,0 +1,14 @@
+# Core pipeline
+yt-dlp==2025.2.19
+nvidia-riva-client==2.26.0
+protobuf==6.33.5
+openai
+httpx
+pysubs2==1.8.0
+python-dotenv
+pydub
+soundfile
+
+# Audio Separation
+audio-separator
+onnxruntime

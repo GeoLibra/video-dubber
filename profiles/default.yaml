@@ -1,0 +1,53 @@
+# 视频配音工具默认配置
+# 通过 --profile 指定覆盖文件，只写需要修改的字段即可
+
+general:
+  target_language: Chinese
+  source_lang: en-US
+  subtitle_mode: target
+  min_free_gb: 2.0
+  font_file: null  # null = 使用内置字体
+
+translation:
+  model: gemini-3.5-flash
+  batch_size: 25
+  confirm: false
+  env_file: null
+  model_config: null
+
+download:
+  format: "bv*[height<=1080]+ba/best[height<=1080]/bv*+ba/best"
+  sub_langs: "en.*,en"
+  ignore_yt_dlp_config: true
+  allow_playlist: false
+  playlist_items: null
+  proxy: null
+  concurrent_fragments: null
+  external_downloader: null
+  cookies_from_browser: null
+
+asr:
+  whisper_model: null
+  skip_separation: false
+
+tts:
+  engine: f5-mlx
+  max_atempo: 1.6
+  max_clip_ms: 80
+  max_overhang_ms: 450
+  hf_offline: false
+  no_segments: false
+
+audio:
+  preserve_gap_audio: false
+  gap_audio_gain_db: -6.0
+  gap_pad_ms: 60
+
+paths:
+  tmp_dir: null
+  status: null
+  log: null
+
+# 运行时自动设置的目录
+runtime:
+  jobs_dir: null

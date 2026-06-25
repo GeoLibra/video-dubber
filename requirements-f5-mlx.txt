@@ -1,0 +1,3 @@
+# Apple Silicon / MLX F5-TTS route.
+# Install with: uv pip install -r requirements-f5-mlx.txt
+f5-tts-mlx

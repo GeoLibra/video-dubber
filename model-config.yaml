@@ -1,0 +1,36 @@
+models:
+  - name: gemini
+    model: gemini-3.5-flash
+    api_key: $GEMINI_API_KEY
+    api_base: https://generativelanguage.googleapis.com/v1beta/openai/
+
+  # - name: openai
+  #   model: gpt-4o
+  #   api_key: $OPENAI_API_KEY
+  #   api_base: https://api.openai.com/v1
+
+  # - name: deepseek
+  #   model: deepseek-v4-pro
+  #   api_key: $DEEPSEEK_API_KEY
+  #   api_base: https://api.deepseek.com
+
+  # - name: ollama
+  #   model: qwen3.5:8b
+  #   api_key: ollama
+  #   api_base: http://localhost:11434/v1
+
+  # NVIDIA 使用统一的 api_base 和 NVIDIA_API_KEY
+  # - name: nvidia-kimi-k2
+  #   model: moonshotai/kimi-k2.6
+  #   api_key: $NVIDIA_API_KEY
+  #   api_base: https://integrate.api.nvidia.com/v1
+  #
+  # - name: nvidia-deepseek-v4-pro
+  #   model: deepseek-ai/deepseek-v4-pro
+  #   api_key: $NVIDIA_API_KEY
+  #   api_base: https://integrate.api.nvidia.com/v1
+  #
+  # - name: nvidia-deepseek-v4-flash
+  #   model: deepseek-ai/deepseek-v4-flash
+  #   api_key: $NVIDIA_API_KEY
+  #   api_base: https://integrate.api.nvidia.com/v1
