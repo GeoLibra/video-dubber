@@ -70,19 +70,29 @@ flowchart LR
 
 ## 🚀 Installation
 
-We recommend using the `install.sh` script to initialize the environment easily:
+Install via the [`npx skills`](https://github.com/vercel-labs/skills) CLI to any compatible agent (OpenCode, Claude Code, Cursor, etc.):
+
+**Project-level install** (recommended, current project only):
 
 ```bash
-bash install.sh
+npx skills add GeoLibra/video-dubber --full-depth -y
 ```
 
-If you want to manually install this directory as a skill in a tool that supports skills:
+**Global install** (user-level, available in all projects):
 
 ```bash
-npx skills add ./skills/video-dubber -a codex -g
+npx skills add GeoLibra/video-dubber -g --full-depth -y
 ```
 
-After installation, the Agent will check and prepare the runtime environment as needed.
+After installation, the Agent will automatically check and prepare the runtime environment — no manual steps needed.
+
+### Let your Agent install it
+
+You can also simply tell your Agent (OpenCode / Claude Code / Codex etc.):
+
+> Install the skill from `https://github.com/GeoLibra/video-dubber`
+
+The Agent will take care of everything.
 
 ---
 
@@ -94,9 +104,9 @@ A video can easily have hundreds or even thousands of subtitle lines — transla
 
 Video Dubber supports delegating subtitle translation to a dedicated translation model. After configuration, the translation runs entirely on the script side without the main Agent's involvement.
 
-### Supported Providers
+### Supported Providers (Default)
 
-| Provider | Default Model | Config |
+| Provider | Model | Config |
 | --- | --- | --- |
 | 🌟 **Google Gemini** (default) | `gemini-3.5-flash` | `GEMINI_API_KEY` |
 | 🤖 **OpenAI** | `gpt-4o` | `OPENAI_API_KEY` |

@@ -70,19 +70,29 @@ flowchart LR
 
 ## 🚀 安装
 
-推荐使用根目录下的 `install.sh` 脚本一键初始化并安装环境：
+通过 [`npx skills`](https://github.com/vercel-labs/skills) CLI 安装到任何兼容的 Agent（OpenCode、Claude Code、Cursor 等）：
+
+**项目级安装**（推荐，仅当前项目生效）：
 
 ```bash
-bash install.sh
+npx skills add GeoLibra/video-dubber --full-depth -y
 ```
 
-如果你希望手动安装到支持 skills 的工具中：
+**全局安装**（用户级，所有项目均可使用）：
 
 ```bash
-npx skills add ./skills/video-dubber -a codex -g
+npx skills add GeoLibra/video-dubber -g --full-depth -y
 ```
 
-安装后，Agent 会按任务需要自动检查并准备运行环境。
+安装后，Agent 会自动检查并准备运行环境，无需手动操作。
+
+### 直接让 Agent 帮你安装
+
+你也可以直接告诉 Agent（OpenCode / Claude Code / Codex 等）：
+
+> 帮我安装 `https://github.com/GeoLibra/video-dubber` 这个 skill
+
+Agent 会自动为你完成安装。
 
 ---
 
@@ -94,9 +104,9 @@ npx skills add ./skills/video-dubber -a codex -g
 
 Video Dubber 支持将字幕翻译独立委托给专门的翻译模型。配置后，翻译过程完全在脚本侧完成，无需主 Agent 参与。
 
-### 支持的翻译服务商
+### 翻译默认支持的模型
 
-| 服务商 | 默认模型 | 需配置项 |
+| 服务商 | 模型 | 需配置项 |
 | --- | --- | --- |
 | 🌟 **Google Gemini**（默认） | `gemini-3.5-flash` | `GEMINI_API_KEY` |
 | 🤖 **OpenAI** | `gpt-4o` | `OPENAI_API_KEY` |
