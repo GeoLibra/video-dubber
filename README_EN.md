@@ -31,7 +31,7 @@ Chinese is the default target language. You can also ask for Japanese, Korean, o
 ## Workflow
 
 ```mermaid
-flowchart TD
+flowchart LR
     A["Video URL or local video"] --> B{"Download only?"}
     B -->|Yes| C["Save source video"]
     B -->|No| D["Get subtitles or transcribe audio"]
