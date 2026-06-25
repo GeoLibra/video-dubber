@@ -1,34 +1,53 @@
-# Video Dubber
+<h1 align="center">🎙️ Video Dubber —— 多语言视频配音 & 字幕翻译工具</h1>
 
-Video Dubber 是一个视频下载、字幕翻译、硬字幕生成和可选声音克隆配音的 skill。它可以处理在线视频或本地视频，输出保留原声的字幕版，也可以根据原视频或参考音频生成目标语言配音版。
+<p align="center"><b>中文</b> | <a href="README_EN.md">English</a></p>
 
-[English README](README_EN.md)
+<p align="center">
+  <a href="#"><img src="https://img.shields.io/badge/配音-支持-blue" alt="配音"></a>
+  <a href="#"><img src="https://img.shields.io/badge/字幕翻译-多语言-green" alt="翻译"></a>
+  <a href="#"><img src="https://img.shields.io/badge/声音克隆-支持-orange" alt="声音克隆"></a>
+  <a href="#"><img src="https://img.shields.io/badge/硬字幕-烧录-red" alt="硬字幕"></a>
+  <a href="#"><img src="https://img.shields.io/badge/API-9家翻译服务商-purple" alt="API"></a>
+</p>
 
-## 功能
+<p align="center">
+  下载在线视频 · 多语言字幕翻译 · 原声/克隆配音 · 硬字幕烧录 · 任务可续跑
+</p>
+
+<br/>
+
+支持 **YouTube / Bilibili / Twitter/X / TikTok** 等站点视频，也支持本地视频文件。默认目标语言为 **中文**，可指定日语、韩语等。
+
+---
+
+## ✨ 功能一览
 
 | 场景 | 结果 |
 | --- | --- |
-| 只下载视频 | 保存原视频 |
-| 翻译字幕，保留原声 | 输出带硬字幕的视频 |
-| 翻译字幕 + 克隆配音 | 输出目标语言配音视频 |
-| 本地视频翻译 | 直接处理本地视频文件 |
-| 指定参考音频 | 用参考声音生成配音 |
+| 🌐 只下载视频 | 保存原视频 |
+| 📝 翻译字幕，保留原声 | 输出带**硬字幕**的视频（原声 + 目标语言字幕） |
+| 🎤 翻译字幕 + 克隆配音 | 输出**目标语言配音**视频 + 硬字幕 |
+| 📂 本地视频翻译 | 直接处理本地 MP4/MKV/AVI 等文件 |
+| 🔊 指定参考音频 | 用**参考声音**（MP3/WAV）生成克隆配音 |
+| 🔄 继续中断任务 | 复用已完成的下载、字幕、翻译和配音片段 |
 
-默认目标语言是中文，也可以指定日语、韩语等语言。
+---
 
-## 特点
+## 🧩 特点
 
 | 特点 | 说明 |
 | --- | --- |
-| 任务可续跑 | 长视频任务中断后，可以用同一个任务目录继续，已完成的下载、字幕、翻译和配音片段会尽量复用。这里指整体任务续跑，不是单纯的下载断点续传。 |
-| 节省 token | 翻译只传字幕编号和文本，不把完整时间轴反复发给模型；已翻译内容会缓存，重跑时只补缺失部分。 |
-| 心跳监控 | 长时间翻译、配音或合成时，任务会记录阶段进度，方便发现卡住的阶段并继续处理。 |
-| 平台字幕优先 | 有平台自带字幕时优先使用，减少转写时间和错误。 |
-| NVIDIA Riva 优先 | 配置 `NVIDIA_API_KEY` 后，音频转字幕会优先使用 NVIDIA Riva gRPC ASR；不可用时再回退本地 Whisper。 |
-| 原声/配音分离 | 可以只做原声硬字幕，也可以生成克隆配音；不需要配音时不会跑声音克隆流程。 |
-| 输出可验证 | 每次生成后会写验证报告，记录视频时长、字幕数量和配音生成状态。 |
+| 🔁 **任务可续跑** | 长视频任务中断后，同目录续跑，已完成的步骤自动跳过。 |
+| 💰 **节省 Token** | 翻译只传字幕编号 + 文本，不反复发送时间轴；已缓存内容不重复翻译。 |
+| ❤️ **心跳监控** | 长时间任务记录阶段进度，方便发现并处理卡住的阶段。 |
+| 🏷️ **平台字幕优先** | 有平台自带字幕时优先使用，减少 ASR 转写时间和错误。 |
+| 🚀 **NVIDIA Riva 优先** | 配置 `NVIDIA_API_KEY` 后 ASR 优先走 NVIDIA Riva gRPC，不可用时回退本地 Whisper。 |
+| 🔇 **原声/配音分离** | 可只做原声硬字幕，不需要配音时不跑声音克隆流程。 |
+| ✅ **输出可验证** | 每次生成后写验证报告，记录视频时长、字幕数、配音状态。 |
 
-## 整体流程
+---
+
+## 🔄 整体流程
 
 ```mermaid
 flowchart LR
@@ -47,83 +66,155 @@ flowchart LR
     L --> M
 ```
 
-## 安装
+---
 
-在支持 skills 的工具中安装：
+## 🚀 安装
 
-```bash
-npx skills add <video-dubber目录> -a codex -g
-```
-
-例如：
+推荐使用根目录下的 `install.sh` 脚本一键初始化并安装环境：
 
 ```bash
-npx skills add ./video-dubber -a codex -g
+bash install.sh
 ```
 
-安装后，Agent 会按任务需要检查并准备运行环境。
+如果你希望手动安装到支持 skills 的工具中：
 
-## 配置(可选)
+```bash
+npx skills add ./skills/video-dubber -a codex -g
+```
 
-不配置 `.env` 时，Agent 仍然可以下载视频、处理本地视频、使用已有字幕，或在没有 API key 时接手翻译。
+安装后，Agent 会按任务需要自动检查并准备运行环境。
 
-建议为长视频配置单独的翻译模型。视频字幕通常很多，整片翻译会消耗较多 token；把字幕翻译交给便宜、速度快的模型，可以降低成本，也能避免占用主 Agent 的上下文。
+---
 
-如果要让脚本自动调用翻译模型或 NVIDIA Riva，在这个 skill 目录中找到 `.env.example`，复制成 `.env` 后填入需要的 key：
+## ⚙️ 配置翻译模型
+
+> ⚡ **核心建议**：为长视频**单独配置翻译模型**，用便宜、快速的模型做字幕翻译，既能降低成本，又能避免占用主 Agent 的上下文。
+
+视频字幕通常很多，一部视频可能有数百至上千条字幕，整片翻译会消耗较多 token。不配置翻译模型时，Agent 也可以自行处理翻译，但会占用主 Agent 上下文。配置独立的翻译模型后，字幕翻译委托给脚本侧专门模型完成，不占用主 Agent 上下文，已缓存的内容也不会重复翻译。
+
+Video Dubber 支持将字幕翻译独立委托给专门的翻译模型。配置后，翻译过程完全在脚本侧完成，无需主 Agent 参与。
+
+### 支持的翻译服务商
+
+| 服务商 | 默认模型 | 需配置项 |
+| --- | --- | --- |
+| 🌟 **Google Gemini**（默认） | `gemini-3.5-flash` | `GEMINI_API_KEY` |
+| 🤖 **OpenAI** | `gpt-4o` | `OPENAI_API_KEY` |
+| 🧠 **DeepSeek** | `deepseek-v4-pro` | `DEEPSEEK_API_KEY` |
+| 🏠 **Ollama 本地模型** | `qwen3.5:8b` | 无需 API Key |
+| 🟢 **NVIDIA 托管模型** | kimi-k2.6 / deepseek-v4 等 | `NVIDIA_API_KEY` |
+
+### 快速配置（只需两步）
+
+<details>
+<summary><b>📋 点击展开详细配置说明</b></summary>
+
+#### 第一步：设置环境变量
+
+在 `video-dubber` 目录中，将 `.env.example` 复制为 `.env`，填入你的 API Key：
 
 ```bash
 cp .env.example .env
-
-# 用于字幕翻译
-GEMINI_API_KEY=...
-
-# 可选：用于 NVIDIA Riva 语音转字幕
-NVIDIA_API_KEY=...
 ```
 
-NVIDIA API key 可在 [NVIDIA Build Models](https://build.nvidia.com/models) 获取。
+```ini
+# .env — 填入任一 Key 即可自动生效
+GEMINI_API_KEY=你的Gemini密钥
+# OPENAI_API_KEY=你的OpenAI密钥
+# DEEPSEEK_API_KEY=你的DeepSeek密钥
+# NVIDIA_API_KEY=你的NVIDIA密钥
+```
 
-`model-config.yaml` 用来配置翻译模型的选择、模型名称和 API 地址。通常只需要填 `.env`；只有要切换翻译服务商、启用 NVIDIA 托管模型或调整 API 地址时，才需要改 `model-config.yaml`。
+> 💡 **只需要填写一个**！默认使用 Gemini，如果你偏好其他服务商，填对应的 Key 并修改 `model-config.yaml` 即可。
 
-`NVIDIA_API_KEY` 可以同时用于 NVIDIA Riva 语音转字幕和 NVIDIA 托管的翻译模型。但翻译是否走 NVIDIA，取决于是否启用了 `model-config.yaml` 里的 NVIDIA 翻译模型配置；只填写 `NVIDIA_API_KEY` 不会自动把翻译模型切到 NVIDIA。
+#### 第二步（可选）：切换翻译模型
 
-NVIDIA Riva 在这里用于 ASR，也就是把原视频语音转成带时间轴的源字幕。后续字幕翻译仍由配置的翻译模型完成，这样可以保留字幕时间轴并支持多种目标语言。
+编辑 `model-config.yaml`，取消对应服务商的注释即可切换：
 
-如果视频平台需要登录态，例如 Bilibili、Twitter/X、Instagram、部分 YouTube 视频，可以告诉 Agent 使用浏览器 cookies。
+```yaml
+models:
+  # Google Gemini（默认，推荐）
+  - name: gemini
+    model: gemini-3.5-flash
+    api_key: $GEMINI_API_KEY
+    api_base: https://generativelanguage.googleapis.com/v1beta/openai/
 
-## 使用方式
+  # OpenAI
+  # - name: openai
+  #   model: gpt-4o
+  #   api_key: $OPENAI_API_KEY
+  #   api_base: https://api.openai.com/v1
 
-安装后直接用自然语言告诉 Agent 你想要什么。
+  # DeepSeek
+  # - name: deepseek
+  #   model: deepseek-v4-pro
+  #   api_key: $DEEPSEEK_API_KEY
+  #   api_base: https://api.deepseek.com
 
-| 输入 | Agent 应该做 |
+  # Ollama 本地（零成本，零 API Key）
+  # - name: ollama
+  #   model: qwen3.5:8b
+  #   api_key: ollama
+  #   api_base: http://localhost:11434/v1
+
+  # NVIDIA 托管（统一 Key，多模型可选）
+  # - name: nvidia-kimi-k2
+  #   model: moonshotai/kimi-k2.6
+  #   api_key: $NVIDIA_API_KEY
+  #   api_base: https://integrate.api.nvidia.com/v1
+```
+
+</details>
+
+### NVIDIA Riva ASR（可选）
+
+除了翻译，`NVIDIA_API_KEY` 还可用于 **NVIDIA Riva** 语音转字幕（ASR）。填写后，ASR 阶段优先走 Riva gRPC，不可用时自动回退本地 Whisper。
+
+> ⚠️ `NVIDIA_API_KEY` 可以同时用于 Riva ASR 和 NVIDIA 翻译模型，但翻译是否走 NVIDIA 取决于 `model-config.yaml` 中的配置，不是只填 Key 就自动切换。
+
+### 其他配置
+
+| 需求 | 配置方式 |
 | --- | --- |
-| 下载这个视频：`https://...` | 只下载视频 |
-| 把这个视频翻译成中文字幕，保留原声 | 生成中文字幕硬字幕版 |
-| 把这个英文视频翻译成中文，并用原说话人的声音配音 | 生成中文字幕 + 中文克隆配音版 |
-| 给这个本地视频加日语字幕：`/path/to/video.mp4` | 处理本地视频并输出日语字幕版 |
-| 用 `reference.wav` 这个声音，给 `video.mp4` 生成中文配音版 | 使用参考音频克隆指定声音 |
-| 继续刚才中断的任务 | 使用同一个任务目录续跑，尽量复用已完成的下载、字幕、翻译和配音片段 |
+| 🔑 视频平台登录态（Bilibili / Twitter / Instagram 等） | 告诉 Agent 使用浏览器 cookies |
+| 🌐 翻译目标语言 | 直接告诉 Agent "翻译成日语/韩语/中文" |
+| 📝 双语字幕 | 告诉 Agent "做成中英双语字幕" |
 
-## 输出文件
+---
 
-常见输出包括：
+## 🎯 使用方式
+
+安装后直接用自然语言告诉 Agent 你想要什么：
+
+| 你说 | Agent 会做 |
+| --- | --- |
+| `下载这个视频：https://...` | 只下载视频 |
+| `把这个视频翻译成中文字幕，保留原声` | 生成中文字幕硬字幕版 |
+| `把这个英文视频翻译成中文，并用原说话人的声音配音` | 生成中文字幕 + 中文克隆配音版 |
+| `给这个本地视频加日语字幕：/path/to/video.mp4` | 处理本地视频并输出日语字幕版 |
+| `用 reference.wav 这个声音，给 video.mp4 生成中文配音版` | 使用参考音频克隆指定声音 |
+| `继续刚才中断的任务` | 使用同一任务目录续跑，复用已完成步骤 |
+
+---
+
+## 📁 输出文件
 
 ```text
-output_original_<lang>_<mode>.mp4   # 原声 + 字幕
-output_cloned_<lang>_<mode>.mp4     # 克隆配音 + 字幕
-verification_report_<lang>_<mode>.json
+output_original_<语言>_<模式>.mp4   # 原声 + 硬字幕
+output_cloned_<语言>_<模式>.mp4     # 克隆配音 + 硬字幕
+verification_report_<语言>_<模式>.json   # 验证报告
 ```
 
-`verification_report` 用来确认输出视频时长、字幕数量和配音生成状态。
+---
 
-## 常用说法
+## 💬 常用说法速查
 
 | 需求 | 可以这样说 |
 | --- | --- |
-| 只要目标语言字幕 | “只显示中文字幕” |
-| 双语字幕 | “做成中英双语字幕” |
-| 不要克隆声音 | “保留原声，不要配音” |
-| 指定语言 | “翻译成日语/韩语/中文” |
-| 使用登录态 | “用 Chrome cookies 下载” |
-| 处理播放列表 | “下载第 1 到第 10 个视频” |
-| 自动识别源语言 | “源语言自动识别” |
+| 只要目标语言字幕 | "只显示中文字幕" |
+| 双语字幕 | "做成中英双语字幕" |
+| 不要克隆声音 | "保留原声，不要配音" |
+| 指定语言 | "翻译成日语/韩语/中文" |
+| 使用登录态 | "用 Chrome cookies 下载" |
+| 处理播放列表 | "下载第 1 到第 10 个视频" |
+| 自动识别源语言 | "源语言自动识别" |

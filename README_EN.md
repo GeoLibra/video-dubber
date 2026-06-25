@@ -1,34 +1,53 @@
-# Video Dubber
+<h1 align="center">🎙️ Video Dubber — Multilingual Video Dubbing & Subtitle Translation Tool</h1>
 
-Video Dubber is a skill for video download, subtitle translation, hard-subtitle rendering, and optional voice-cloned dubbing. It works with online video links or local video files, and can produce either an original-audio subtitled video or a dubbed video in the target language.
+<p align="center"><a href="README.md">中文</a> | <b>English</b></p>
 
-[中文 README](README.md)
+<p align="center">
+  <a href="#"><img src="https://img.shields.io/badge/Dubbing-Supported-blue" alt="Dubbing"></a>
+  <a href="#"><img src="https://img.shields.io/badge/Subtitle%20Translation-Multilingual-green" alt="Translation"></a>
+  <a href="#"><img src="https://img.shields.io/badge/Voice%20Cloning-Supported-orange" alt="Voice Cloning"></a>
+  <a href="#"><img src="https://img.shields.io/badge/Hard%20Subtitles-Burned--in-red" alt="Hard Subtitles"></a>
+  <a href="#"><img src="https://img.shields.io/badge/API-9%20Translation%20Providers-purple" alt="API"></a>
+</p>
 
-## Features
+<p align="center">
+  Download Online Videos · Multilingual Subtitle Translation · Original/Cloned Dubbing · Hard-Subtitle Burn-in · Resumable Jobs
+</p>
+
+<br/>
+
+Supports **YouTube / Bilibili / Twitter/X / TikTok** and other online video platforms, as well as local video files. The default target language is **Chinese**; you can also specify Japanese, Korean, etc.
+
+---
+
+## ✨ Feature Overview
 
 | Scenario | Result |
 | --- | --- |
-| Download only | Save the source video |
-| Translate subtitles and keep original audio | Export a hard-subtitled video |
-| Translate subtitles and clone the speaker voice | Export a dubbed video in the target language |
-| Translate a local video | Process a local `.mp4` directly |
-| Use a reference voice | Dub with an external reference audio |
+| 🌐 Download only | Save the source video |
+| 📝 Translate subtitles, keep original audio | Output with **hard subtitles** (original audio + target language subs) |
+| 🎤 Translate subtitles + cloned dubbing | Output **target-language dubbed** video + hard subtitles |
+| 📂 Local video translation | Process local MP4/MKV/AVI files directly |
+| 🔊 Reference audio | Use **reference audio** (MP3/WAV) for voice-cloned dubbing |
+| 🔄 Resume interrupted tasks | Reuse completed downloads, subtitles, translation, and dubbing chunks |
 
-Chinese is the default target language. You can also ask for Japanese, Korean, or another target language.
+---
 
-## Highlights
+## 🧩 Highlights
 
 | Highlight | What it means |
 | --- | --- |
-| Resumable jobs | If a long task is interrupted, continue with the same job directory. Completed downloads, subtitles, translations, and dubbing chunks are reused where possible. This means task-level resume, not just download resume. |
-| Token-conscious translation | Translation sends only subtitle IDs and text to the model instead of repeatedly sending the full timeline. Completed translations are cached, and reruns only fill missing items. |
-| Heartbeat tracking | Long translation, dubbing, and synthesis stages record progress, making it easier to notice and recover from stuck stages. |
-| Platform subtitles first | When platform subtitles are available, they are preferred over ASR to reduce time and transcription errors. |
-| NVIDIA Riva first | If `NVIDIA_API_KEY` is configured, audio transcription uses NVIDIA Riva gRPC ASR first, then falls back to local Whisper if unavailable. |
-| Separate subtitle-only and dubbing paths | You can keep original audio with hard subtitles, or generate voice-cloned dubbing. If dubbing is not requested, voice cloning is skipped. |
-| Verifiable output | Each completed run writes a verification report with output duration, subtitle count, and dubbing status. |
+| 🔁 **Resumable jobs** | Interrupted? Continue from the same directory; completed steps auto-skip. |
+| 💰 **Token saving** | Translation sends only subtitle IDs + text, not the full timeline repeatedly; cached content is not re-translated. |
+| ❤️ **Heartbeat monitoring** | Long-running tasks log stage progress so you can find and handle stuck stages. |
+| 🏷️ **Platform subtitles first** | Use platform subtitles when available to reduce ASR time and errors. |
+| 🚀 **NVIDIA Riva first** | With `NVIDIA_API_KEY`, ASR prioritizes NVIDIA Riva gRPC, falling back to local Whisper. |
+| 🔇 **Original/dubbing separation** | Can produce original-audio hard-subtitled output without running voice cloning. |
+| ✅ **Verifiable output** | Each run writes a verification report with duration, subtitle count, and dubbing status. |
 
-## Workflow
+---
+
+## 🔄 Workflow
 
 ```mermaid
 flowchart LR
@@ -47,83 +66,157 @@ flowchart LR
     L --> M
 ```
 
-## Installation
+---
 
-Install this directory as a skill in a tool that supports skills:
+## 🚀 Installation
+
+We recommend using the `install.sh` script to initialize the environment easily:
 
 ```bash
-npx skills add <video-dubber-directory> -a codex -g
+bash install.sh
 ```
 
-Example:
+If you want to manually install this directory as a skill in a tool that supports skills:
 
 ```bash
-npx skills add ./video-dubber -a codex -g
+npx skills add ./skills/video-dubber -a codex -g
 ```
 
 After installation, the Agent will check and prepare the runtime environment as needed.
 
-## Configuration(optional)
+---
 
-Without `.env`, the Agent can still download videos, process local videos, use existing subtitles, or handle translation itself when no API key is available.
+## ⚙️ Translation Model Configuration
 
-For long videos, it is recommended to configure a separate translation model. Videos often contain many subtitle lines, and full-video subtitle translation can consume a lot of tokens. Using a cheaper, faster model for subtitle translation can reduce cost and avoid filling the main Agent context.
+> ⚡ **Key tip**: Configure a **separate translation model** for long videos. Using a cheap, fast model for subtitle translation reduces cost and avoids consuming the main Agent's context.
 
-If you want the script to call translation models or NVIDIA Riva automatically, find `.env.example` in this skill directory, copy it to `.env`, and add the keys you need:
+A video can easily have hundreds or even thousands of subtitle lines — translating the entire thing consumes a significant number of tokens. Without a dedicated translation model, the main Agent can handle translation, but it will occupy the Agent's context. With a dedicated model configured, subtitle translation runs entirely on the script side without consuming the main Agent's context, and cached segments won't be re-translated.
+
+Video Dubber supports delegating subtitle translation to a dedicated translation model. After configuration, the translation runs entirely on the script side without the main Agent's involvement.
+
+### Supported Providers
+
+| Provider | Default Model | Config |
+| --- | --- | --- |
+| 🌟 **Google Gemini** (default) | `gemini-3.5-flash` | `GEMINI_API_KEY` |
+| 🤖 **OpenAI** | `gpt-4o` | `OPENAI_API_KEY` |
+| 🧠 **DeepSeek** | `deepseek-v4-pro` | `DEEPSEEK_API_KEY` |
+| 🏠 **Ollama (local)** | `qwen3.5:8b` | No API Key needed |
+| 🟢 **NVIDIA hosted** | kimi-k2.6 / deepseek-v4 etc. | `NVIDIA_API_KEY` |
+
+### Quick Setup (Two Steps)
+
+<details>
+<summary><b>📋 Click to expand detailed setup</b></summary>
+
+#### Step 1: Set environment variables
+
+Copy `.env.example` to `.env` in the `video-dubber` directory and fill in your API Key:
 
 ```bash
 cp .env.example .env
-
-# For subtitle translation
-GEMINI_API_KEY=...
-
-# Optional: for NVIDIA Riva audio transcription
-NVIDIA_API_KEY=...
 ```
 
-You can get an NVIDIA API key from [NVIDIA Build Models](https://build.nvidia.com/models).
+```ini
+# .env — Fill in any one key and it works
+GEMINI_API_KEY=your_gemini_key
+# OPENAI_API_KEY=your_openai_key
+# DEEPSEEK_API_KEY=your_deepseek_key
+# NVIDIA_API_KEY=your_nvidia_key
+```
 
-`model-config.yaml` configures translation model selection, model names, and API endpoints. Most users only need to fill `.env`; edit `model-config.yaml` only when you want to switch translation providers, enable NVIDIA-hosted models, or adjust API endpoints.
+> 💡 **Only one key needed!** Gemini is the default. If you prefer another provider, fill in the corresponding key and edit `model-config.yaml`.
 
-`NVIDIA_API_KEY` can be used for both NVIDIA Riva transcription and NVIDIA-hosted translation models. Translation uses NVIDIA only when an NVIDIA translation model is enabled in `model-config.yaml`; setting `NVIDIA_API_KEY` alone does not automatically switch subtitle translation to NVIDIA.
+#### Step 2 (optional): Switch translation model
 
-NVIDIA Riva is used here for ASR, turning source speech into timestamped subtitles. Subtitle translation still uses the configured translation model so the pipeline can preserve subtitle timing and support multiple target languages.
+Edit `model-config.yaml` and uncomment the provider you want:
 
-If a platform requires login state, such as Bilibili, Twitter/X, Instagram, or some YouTube videos, tell the Agent to use browser cookies.
+```yaml
+models:
+  # Google Gemini (default, recommended)
+  - name: gemini
+    model: gemini-3.5-flash
+    api_key: $GEMINI_API_KEY
+    api_base: https://generativelanguage.googleapis.com/v1beta/openai/
 
-## How To Use
+  # OpenAI
+  # - name: openai
+  #   model: gpt-4o
+  #   api_key: $OPENAI_API_KEY
+  #   api_base: https://api.openai.com/v1
 
-After installing the skill, tell the Agent what you want in natural language.
+  # DeepSeek
+  # - name: deepseek
+  #   model: deepseek-v4-pro
+  #   api_key: $DEEPSEEK_API_KEY
+  #   api_base: https://api.deepseek.com
 
-| Input | Agent should do |
+  # Ollama (local, zero cost, no API key)
+  # - name: ollama
+  #   model: qwen3.5:8b
+  #   api_key: ollama
+  #   api_base: http://localhost:11434/v1
+
+  # NVIDIA hosted (single key, multiple models)
+  # - name: nvidia-kimi-k2
+  #   model: moonshotai/kimi-k2.6
+  #   api_key: $NVIDIA_API_KEY
+  #   api_base: https://integrate.api.nvidia.com/v1
+```
+
+</details>
+
+### NVIDIA Riva ASR (Optional)
+
+Besides translation, `NVIDIA_API_KEY` can also be used for **NVIDIA Riva** speech-to-text (ASR). When configured, ASR prioritizes Riva gRPC, falling back to local Whisper if unavailable.
+
+> ⚠️ `NVIDIA_API_KEY` can be used for both Riva ASR and NVIDIA translation models, but translation only uses NVIDIA when explicitly enabled in `model-config.yaml`.
+
+### Other Configuration
+
+| Need | How to configure |
 | --- | --- |
-| Download this video: `https://...` | Download the source video only |
-| Translate this video into Chinese subtitles and keep the original audio | Export a Chinese hard-subtitled version |
-| Translate this English video into Chinese and dub it with the original speaker's voice | Export Chinese subtitles + Chinese voice-cloned dubbing |
-| Add Japanese subtitles to this local video: `/path/to/video.mp4` | Process the local video and export a Japanese subtitled version |
-| Use `reference.wav` as the voice for `video.mp4` | Clone the external reference voice for dubbing |
-| Continue the interrupted task | Resume with the same job directory and reuse completed downloads, subtitles, translations, and dubbing chunks where possible |
+| 🔑 Platform login (Bilibili / Twitter / Instagram etc.) | Tell the Agent to use browser cookies |
+| 🌐 Translation target language | Tell the Agent "translate to Japanese/Korean/Chinese" |
+| 📝 Bilingual subtitles | Tell the Agent "use Chinese-English bilingual subtitles" |
 
-## Output Files
+---
 
-Common outputs:
+## 🎯 How To Use
+
+After installing the skill, tell the Agent what you want in natural language:
+
+| You say | Agent will do |
+| --- | --- |
+| `Download this video: https://...` | Download the source video only |
+| `Translate this video into Chinese subtitles and keep the original audio` | Export a Chinese hard-subtitled version |
+| `Translate this English video into Chinese and dub it with the original speaker's voice` | Export Chinese subtitles + Chinese voice-cloned dubbing |
+| `Add Japanese subtitles to this local video: /path/to/video.mp4` | Process the local video and export a Japanese subtitled version |
+| `Use reference.wav as the voice for video.mp4` | Clone the external reference voice for dubbing |
+| `Continue the interrupted task` | Resume with the same job directory and reuse completed steps |
+
+---
+
+## 📁 Output Files
 
 ```text
-output_original_<lang>_<mode>.mp4   # original audio + subtitles
-output_cloned_<lang>_<mode>.mp4     # cloned dubbing + subtitles
-verification_report_<lang>_<mode>.json
+output_original_<lang>_<mode>.mp4   # original audio + hard subtitles
+output_cloned_<lang>_<mode>.mp4     # cloned dubbing + hard subtitles
+verification_report_<lang>_<mode>.json   # verification report
 ```
 
 The verification report records output duration, subtitle count, and dubbing status.
 
-## Common Requests
+---
+
+## 💬 Common Requests
 
 | Need | Say |
 | --- | --- |
-| Target-language subtitles only | “Only show Chinese subtitles” |
-| Bilingual subtitles | “Use Chinese-English bilingual subtitles” |
-| No voice cloning | “Keep original audio, no dubbing” |
-| Specific target language | “Translate to Japanese/Korean/Chinese” |
-| Browser login state | “Use Chrome cookies to download” |
-| Playlist range | “Download videos 1 to 10” |
-| Auto-detect source language | “Auto-detect the source language” |
+| Target-language subtitles only | "Only show Chinese subtitles" |
+| Bilingual subtitles | "Use Chinese-English bilingual subtitles" |
+| No voice cloning | "Keep original audio, no dubbing" |
+| Specific target language | "Translate to Japanese/Korean/Chinese" |
+| Browser login state | "Use Chrome cookies to download" |
+| Playlist range | "Download videos 1 to 10" |
+| Auto-detect source language | "Auto-detect the source language" |
