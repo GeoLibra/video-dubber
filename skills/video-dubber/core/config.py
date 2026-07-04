@@ -62,6 +62,8 @@ def _apply_cli_overrides(cfg, args):
         "translation": {
             "model": getattr(args, "translation_model", None),
             "batch_size": getattr(args, "translation_batch_size", None),
+            "workers": getattr(args, "translation_workers", None),
+            "allow_source_fallback": getattr(args, "allow_source_fallback", None),
             "confirm": getattr(args, "confirm_translation", None),
             "env_file": getattr(args, "env_file", None),
             "model_config": getattr(args, "model_config", None),

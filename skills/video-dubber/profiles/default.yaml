@@ -11,6 +11,8 @@ general:
 translation:
   model: gemini-3.5-flash
   batch_size: 25
+  workers: 1
+  allow_source_fallback: false
   confirm: false
   env_file: null
   model_config: null

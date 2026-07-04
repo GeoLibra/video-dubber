@@ -27,7 +27,7 @@ model: gemini-3.5-flash
 6. **字幕文本和 TTS 文本分离只用于 voiceover 模式**：`display_text` 短、`tts_text` 自然长会导致“语音比字幕说得多”。除非用户明确要解说型旁白，否则不要启用这套分离策略。
 7. **翻译只传 id|text**：不要把完整 SRT、时间码、空行塞进对话。分批翻译，脚本按 id 拼回时间轴。
 8. **支持外部参考音频**：用户给 `--ref-audio` 时优先使用它；必须配 `--ref-text`、`--ref-text-file` 或 `--auto-transcribe-ref`。
-9. **长任务低噪声且可续跑**：核心脚本写 `status.json`、`run.log` 和阶段产物。意外中断后，用同一个 `job_dir/status/log` 和相同参数重跑，脚本会复用已完成的视频、ASR、翻译、参考音频和 TTS chunk。
+9. **长任务低噪声且可续跑**：核心脚本写 `status.json`、`run.log` 和阶段产物。意外中断后，用同一个 `job_dir/status/log` 和相同参数重跑，脚本会复用已完成的视频、ASR、翻译、参考音频和 TTS chunk；Agent 只在阶段变化、失败、完成或用户询问时汇报。
 10. **完成后必须验证**：检查视频/音频流时长、字幕条数、TTS 生成/跳过/错误数，并输出 `verification_report_<lang>_<mode>.json`。
 11. **音色质量优先于盲目重生**：如果已有 `output_cloned_<lang>_<mode>.mp4` 的音色更像原说话人，不要用新的参考片段或长分组全量覆盖。先保留旧版作为音色基线，再用 strict sync 重建字幕和 TTS 文本。
 12. **非语音标记不进画面**：`[MUSIC]`、`[音乐]`、`[APPLAUSE]`、`[掌声]`、`music playing` 等只用于判断静音/背景音 gap，必须跳过 TTS，并把 ASS 屏幕字幕写空；不要把方括号提示烧进最终视频。
@@ -224,10 +224,11 @@ id|text
 脚本保存 `translations_<lang>.json`，并生成 `subtitles_<lang>_<mode>.ass`。
 
 长字幕翻译必须 checkpoint：
-- 每批翻译成功后立刻写入 `translations_<lang>.json`，不要等全部批次完成才落盘；长视频中断或 API 卡住时，内存累计会丢掉已完成批次。
-- 重跑时读取已有翻译缓存，只请求缺失 id。缓存 key 读入后要转回整数。
-- 每批打印低噪声进度，例如 `batch 23/75 saved 40; total=920/2995`；长时间没有输出时，至少能从缓存数量和状态文件判断是否推进。
-- 模型可能少返回某些 id，完成后必须检查 `0..len(subs)-1` 是否全部覆盖；缺失时只把缺失 id 组成小批次补翻译。
+- 每批翻译成功后立刻写入 `translations_<lang>.json` 和 `status.json`，不要等全部批次完成才落盘；长视频中断或 API 卡住时，内存累计会丢掉已完成批次。
+- 重跑时读取 hash 匹配的已有翻译缓存，只请求缺失 id。缓存 key 读入后要转回整数；hash 或模型不匹配时先备份旧缓存，再开始新缓存。
+- 每批打印低噪声进度，例如 `batch 23/75 saved; total=920/2995`，并把 `translated/total/batch/batches/last_seen` 写入 `status.json`；Agent 不要为了确认进度反复读日志。
+- 长视频可以使用 `--translation-workers 4` 并发翻译；优先靠 checkpoint 和缺失 id 补翻保持可续跑，不要在 job 目录临时写另一个翻译脚本。
+- 模型可能少返回某些 id，完成后必须检查 `0..len(subs)-1` 是否全部覆盖；缺失时只把缺失 id 组成小批次补翻译。默认缺失即失败，只有显式 `--allow-source-fallback` 才允许用原文回退。
 - 如果模型返回不合法 JSON、控制字符或连接错误，重试当前批次，不要回退成原文字幕，也不要直接写 ASS。
 
 默认 strict sync 输出时：
@@ -391,7 +392,7 @@ uv pip install -r requirements-f5-pytorch.txt  # PyTorch 后端
 
 ## 长任务运行协议
 
-超过 3 分钟的任务不要频繁自然语言汇报。读取进度时只看 `status.json`：
+超过 3 分钟的任务不要频繁自然语言汇报。启动后台任务后，把对话让给脚本；除非用户追问，只在阶段变化、失败、完成或 `last_seen` 超时风险时更新。读取进度时只看 `status.json`：
 
 ```json
 {
@@ -403,7 +404,7 @@ uv pip install -r requirements-f5-pytorch.txt  # PyTorch 后端
 
 详细日志保存在 `run.log`，除非失败排查，不要整段读入上下文。
 
-进度更新要低噪声，但长字幕翻译要有可诊断的批次进度。不要输出“已生成 4 段，继续跑全量”这类只证明任务仍在运行的信息；翻译可以输出 `batch x/y saved n; total=a/b`，TTS 只报告关键阶段、异常和最终验证摘要。
+进度更新要低噪声，但长字幕翻译要有可诊断的批次进度。不要输出“已生成 4 段，继续跑全量”这类只证明任务仍在运行的信息；翻译进度看 `translated/total/batch/batches`，FFmpeg 长视频合成只确认开始和结束，除非文件不增长或状态超时。
 
 续跑前先确认没有同一 job 的旧进程还在运行。若无法查看进程，就至少检查 chunk 数量和最终输出文件时间戳；避免两个 TTS 进程同时写同一目录。
 
@@ -428,7 +429,7 @@ uv pip install -r requirements-f5-pytorch.txt  # PyTorch 后端
 }
 ```
 
-阈值：翻译阶段 15 分钟无更新 → 卡死；TTS 阶段 30 分钟无更新 → 卡死；最终合成 10 分钟无更新 → 卡死。
+阈值：翻译阶段 15 分钟无更新 → 卡死；TTS 阶段 30 分钟无更新 → 卡死；最终合成 10 分钟无更新 → 卡死。正常运行时不要按分钟向用户自然语言汇报。
 
 `run_pipeline.py` 在翻译每批、TTS 每生成一个 chunk、合成前后各写一次 `last_seen`。L1 监视器每分钟读 `status.json`，超时 `stage_timeout_min × 3` 则执行阶段重启命令并写入 `heartbeat.log`，不做其他操作。L0 若发现 `last_seen` 超过 2 小时，无论监视器是否存在，都重新拉起脚本。
 

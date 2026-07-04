@@ -12,6 +12,7 @@ import json
 import shutil
 import sys
 import traceback
+from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -45,7 +46,12 @@ def log(msg, step=None):
 
 
 def update_status(status_file, status, msg="", **extra):
-    payload = {"status": status, "message": msg, **extra}
+    payload = {
+        "status": status,
+        "message": msg,
+        "last_seen": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        **extra,
+    }
     Path(status_file).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -77,6 +83,8 @@ def parse_args():
     parser.add_argument("--source-lang", default="en")
     parser.add_argument("--translation-model", default="gemini-3.5-flash")
     parser.add_argument("--translation-batch-size", type=int, default=25)
+    parser.add_argument("--translation-workers", type=int, default=1)
+    parser.add_argument("--allow-source-fallback", action="store_true")
     parser.add_argument("--confirm-translation", action="store_true")
     parser.add_argument("--subtitle-mode", choices=["bilingual", "target", "source"], default="target")
     parser.add_argument("--ref-audio")
@@ -185,6 +193,9 @@ def main():
         meter.phase_start("asr")
         update_status(args.status, "running", "transcribing", stage="asr")
         subs = transcribe_audio(audio_path, job_dir, args)
+        canonical_srt = job_dir / "canonical_source.srt"
+        subs.save(str(canonical_srt))
+        log(f"Canonical source subtitles: {canonical_srt} ({len(subs)} entries)", "SUBTITLE")
         meter.phase_end()
 
         if not args.confirm_translation:
@@ -206,7 +217,7 @@ def main():
             sys.exit(0)
 
         meter.phase_start("translation")
-        update_status(args.status, "running", "translating", stage="translation")
+        update_status(args.status, "running", "translating", stage="translation", stage_timeout_min=15)
         ass_path, subs_translated, _translations = translate_subtitles(subs, job_dir, args)
         if ass_path is None:
             slug = lang_slug(args.target_language)
@@ -262,7 +273,7 @@ def main():
             tts_audio = add_gap_audio(tts_audio, audio_path, subs_translated, job_dir, video_duration_s, args)
 
         meter.phase_start("synthesis")
-        update_status(args.status, "running", "synthesizing videos", stage="synthesis")
+        update_status(args.status, "running", "synthesizing videos", stage="synthesis", stage_timeout_min=10)
         out_orig, out_cloned = synthesize_videos(
             video_path, no_vocals_path, tts_audio, ass_path, job_dir, video_duration_s, args
         )

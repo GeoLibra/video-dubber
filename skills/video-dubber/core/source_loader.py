@@ -150,6 +150,8 @@ def write_job_config(job_dir, args, config=None):
         "target_slug": lang_slug(args.target_language),
         "subtitle_mode": args.subtitle_mode,
         "translation_model": args.translation_model,
+        "translation_workers": getattr(args, "translation_workers", 1),
+        "allow_source_fallback": getattr(args, "allow_source_fallback", False),
         "model_config": args.model_config,
         "tts_engine": args.tts_engine,
         "ref_audio": args.ref_audio,
