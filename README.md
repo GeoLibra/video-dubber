@@ -182,6 +182,20 @@ models:
 
 除了翻译，`NVIDIA_API_KEY` 还可用于 **NVIDIA Riva** 语音转字幕（ASR）。填写后，ASR 阶段优先走 Riva gRPC，不可用时自动回退本地 Whisper。
 
+#### 申请 NVIDIA API Key
+
+请前往 NVIDIA 官方模型目录申请和管理 API Key：
+
+[https://build.nvidia.com/models](https://build.nvidia.com/models)
+
+申请后，在 `.env` 中填写：
+
+```ini
+NVIDIA_API_KEY=你的NVIDIA密钥
+```
+
+同一个 Key 可用于 NVIDIA Riva ASR，也可用于 NVIDIA 托管翻译模型；翻译模型是否启用，仍由 `model-config.yaml` 中的配置决定。
+
 > ⚠️ `NVIDIA_API_KEY` 可以同时用于 Riva ASR 和 NVIDIA 翻译模型，但翻译是否走 NVIDIA 取决于 `model-config.yaml` 中的配置，不是只填 Key 就自动切换。
 
 ### 其他配置

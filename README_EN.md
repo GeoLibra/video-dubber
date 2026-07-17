@@ -182,6 +182,20 @@ models:
 
 Besides translation, `NVIDIA_API_KEY` can also be used for **NVIDIA Riva** speech-to-text (ASR). When configured, ASR prioritizes Riva gRPC, falling back to local Whisper if unavailable.
 
+#### Request an NVIDIA API Key
+
+Apply for and manage the NVIDIA API Key from NVIDIA's official model catalog:
+
+[https://build.nvidia.com/models](https://build.nvidia.com/models)
+
+Then add it to `.env`:
+
+```ini
+NVIDIA_API_KEY=your_nvidia_key
+```
+
+The same key can be used for NVIDIA Riva ASR and NVIDIA-hosted translation models. Translation still requires enabling the desired model in `model-config.yaml`.
+
 > ⚠️ `NVIDIA_API_KEY` can be used for both Riva ASR and NVIDIA translation models, but translation only uses NVIDIA when explicitly enabled in `model-config.yaml`.
 
 ### Other Configuration
