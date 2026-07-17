@@ -150,10 +150,17 @@ def generate_and_merge(subs, out_dir, ref_audio_path, ref_text, video_duration_s
     from pydub import AudioSegment
 
     slug = lang_slug(args.target_language)
-    merged_wav = Path(out_dir) / f"merged_tts_{slug}.wav"
-    report_path = Path(out_dir) / f"tts_alignment_report_{slug}.json"
-    report_meta_path = Path(out_dir) / f"tts_alignment_report_{slug}.meta.json"
-    partial_report_path = Path(out_dir) / f"tts_alignment_partial_{slug}.json"
+    engine_slug = args.tts_engine.replace("-", "")
+    resolved_model = None
+    if args.tts_engine == "qwen3-tts":
+        from .tts_qwen3_mlx import resolve_model_path
+        resolved_model = resolve_model_path(
+            getattr(args, "qwen3_model", None), hf_offline=args.hf_offline
+        )
+    merged_wav = Path(out_dir) / f"merged_tts_{slug}_{engine_slug}.wav"
+    report_path = Path(out_dir) / f"tts_alignment_report_{slug}_{engine_slug}.json"
+    report_meta_path = Path(out_dir) / f"tts_alignment_report_{slug}_{engine_slug}.meta.json"
+    partial_report_path = Path(out_dir) / f"tts_alignment_partial_{slug}_{engine_slug}.json"
 
     if args.tts_engine == "none":
         report = []
@@ -169,8 +176,14 @@ def generate_and_merge(subs, out_dir, ref_audio_path, ref_text, video_duration_s
     expected_meta = {
         "tts_hash": tts_hash,
         "target_language": args.target_language,
+        "tts_engine": args.tts_engine,
+        "tts_model": resolved_model,
         "ref_text_hash": hashlib.sha256(ref_text.encode("utf-8")).hexdigest(),
+        "ref_audio_hash": hashlib.sha256(Path(ref_audio_path).read_bytes()).hexdigest(),
         "video_duration_ms": int(round(video_duration_s * 1000)),
+        "max_atempo": args.max_atempo,
+        "max_clip_ms": args.max_clip_ms,
+        "max_overhang_ms": args.max_overhang_ms,
     }
     if merged_wav.exists() and report_path.exists() and report_meta_path.exists():
         report_meta = json.loads(report_meta_path.read_text(encoding="utf-8"))
@@ -182,6 +195,9 @@ def generate_and_merge(subs, out_dir, ref_audio_path, ref_text, video_duration_s
     timeline = AudioSegment.silent(duration=video_ms, frame_rate=24000)
     report = []
     engine = get_engine(args.tts_engine)
+    cache_key = hashlib.sha256(
+        json.dumps(expected_meta, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()[:12]
 
     for idx, sub in enumerate(subs):
         tts_text = _get_text(sub)
@@ -195,16 +211,23 @@ def generate_and_merge(subs, out_dir, ref_audio_path, ref_text, video_duration_s
             report.append(item)
             continue
 
-        chunk_wav = Path(out_dir) / f"chunk_{slug}_{idx:04d}.wav"
+        chunk_wav = Path(out_dir) / f"chunk_{slug}_{engine_slug}_{cache_key}_{idx:04d}.wav"
         try:
-            engine.synthesize(tts_text, ref_audio_path, ref_text, str(chunk_wav), hf_offline=args.hf_offline)
+            engine.synthesize(
+                tts_text, ref_audio_path, ref_text, str(chunk_wav),
+                hf_offline=args.hf_offline,
+                target_language=args.target_language,
+                model_path=resolved_model,
+            )
             chunk_audio = AudioSegment.from_file(chunk_wav)
             item["raw_ms"] = len(chunk_audio)
             aligned, fit_stats = _fit_audio_to_duration(chunk_audio, target_ms, tmp_dir, args)
             item.update(fit_stats)
             timeline = timeline.overlay(aligned, position=sub.start)
             if not args.no_segments:
-                aligned_path = Path(out_dir) / f"chunk_{slug}_{idx:04d}_aligned.wav"
+                aligned_path = Path(out_dir) / (
+                    f"chunk_{slug}_{engine_slug}_{cache_key}_{idx:04d}_aligned.wav"
+                )
                 try:
                     aligned.export(aligned_path, format="wav")
                     item["segment_path"] = str(aligned_path)
@@ -220,7 +243,7 @@ def generate_and_merge(subs, out_dir, ref_audio_path, ref_text, video_duration_s
     report_meta_path.write_text(json.dumps(expected_meta, ensure_ascii=False, indent=2), encoding="utf-8")
     partial_report_path.unlink(missing_ok=True)
     if args.no_segments:
-        for chunk_path in Path(out_dir).glob(f"chunk_{slug}_*.wav"):
+        for chunk_path in Path(out_dir).glob(f"chunk_{slug}_{engine_slug}_{cache_key}_*.wav"):
             chunk_path.unlink(missing_ok=True)
     return str(merged_wav), report
 
@@ -228,9 +251,11 @@ def generate_and_merge(subs, out_dir, ref_audio_path, ref_text, video_duration_s
 def add_gap_audio(tts_audio, raw_audio, subs, out_dir, video_duration_s, args):
     from pydub import AudioSegment
 
-    suffix = f"{lang_slug(args.target_language)}_{args.subtitle_mode}"
+    engine_slug = args.tts_engine.replace("-", "")
+    suffix = f"{lang_slug(args.target_language)}_{args.subtitle_mode}_{engine_slug}"
     out_path = Path(out_dir) / f"merged_tts_{suffix}.with_gap_original.wav"
-    if out_path.exists():
+    inputs = [Path(tts_audio), Path(raw_audio)]
+    if out_path.exists() and out_path.stat().st_mtime >= max(p.stat().st_mtime for p in inputs):
         return str(out_path)
 
     total_ms = int(round(video_duration_s * 1000))

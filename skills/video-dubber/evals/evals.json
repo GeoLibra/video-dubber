@@ -1,0 +1,43 @@
+{
+  "skill_name": "video-dubber",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "下载这个 YouTube 视频的真实 1080p，翻译成中文，用原说话人音色配中文，保留无对白区间的环境声。没有特别指定 TTS 模型。",
+      "expected_output": "默认使用 DeepSeek V4 Flash 翻译和 Qwen3-TTS 克隆，保持 strict sync，输出带 qwen3tts 后缀的 1080p 视频与验证报告。",
+      "files": [],
+      "expectations": [
+        "默认 TTS 引擎是 qwen3-tts",
+        "默认翻译模型别名是 deepseek",
+        "模型复用而非静默重新下载",
+        "输出文件和缓存包含引擎标识",
+        "验证报告包含错误、裁切和质量告警"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "复用刚才的英文视频和参考音色，再做一个日语版本给我测试，不要覆盖中文版本。",
+      "expected_output": "复用视频、字幕源、参考音频和 Qwen 模型；重新生成日语翻译与日语 TTS，传 japanese 语言代码，并输出独立的 ja/qwen3tts 产物。",
+      "files": [],
+      "expectations": [
+        "日语 TTS 使用 japanese 语言代码",
+        "translations_ja 与中文缓存隔离",
+        "同一参考音频和参考文本用于可比性",
+        "日语超长风险段通过报告定位并局部修复",
+        "中文产物不被覆盖"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "这个本地视频只翻译并烧录中文字幕，保留原声，不要克隆声音；同时保留原有环境声。",
+      "expected_output": "选择 tts-engine=none，完全跳过参考音频、音频分离和 TTS，仅生成原音轨硬字幕视频及 subtitle-only 验证报告。",
+      "files": [],
+      "expectations": [
+        "tts-engine=none 时不调用 Qwen3-TTS",
+        "preserve-gap-audio 不会对空 TTS 音轨执行混音",
+        "输出 clone_voice=false 和 tts_engine=none",
+        "原视频时间轴和原音轨保持不变"
+      ]
+    }
+  ]
+}

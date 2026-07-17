@@ -11,10 +11,10 @@ if ! command -v uv &> /dev/null; then
     export PATH="$HOME/.cargo/bin:$PATH"
 fi
 
-TTS_BACKEND="${VIDEO_DUBBER_TTS_BACKEND:-mlx}"
+TTS_BACKEND="${VIDEO_DUBBER_TTS_BACKEND:-qwen3}"
 
 # compute hash of all requirements files + backend choice as cache key
-HASH_SOURCE=$(cat requirements.txt requirements-f5-mlx.txt requirements-f5-pytorch.txt 2>/dev/null)
+HASH_SOURCE=$(cat requirements.txt requirements-qwen3-tts.txt requirements-f5-mlx.txt requirements-f5-pytorch.txt 2>/dev/null)
 ENV_HASH=$(echo "$HASH_SOURCE" | md5 2>/dev/null || echo "$HASH_SOURCE" | md5sum 2>/dev/null | cut -d' ' -f1)
 ENV_HASH="${ENV_HASH}:${TTS_BACKEND}"
 
@@ -25,13 +25,17 @@ if [ -f .venv/.env_hash ] && [ "$(cat .venv/.env_hash)" = "$ENV_HASH" ] && [ -f 
 fi
 
 echo "[SETUP] Creating or updating uv virtual environment..."
-uv venv .venv --seed
+uv venv .venv --python 3.10 --seed
 source .venv/bin/activate
 
 echo "[SETUP] Installing dependencies..."
 uv pip install -r requirements.txt
 
 case "$TTS_BACKEND" in
+  qwen3)
+    echo "[SETUP] Installing Qwen3-TTS MLX backend..."
+    uv pip install -r requirements-qwen3-tts.txt
+    ;;
   mlx)
     echo "[SETUP] Installing MLX F5-TTS backend..."
     uv pip install -r requirements-f5-mlx.txt
@@ -44,7 +48,7 @@ case "$TTS_BACKEND" in
     echo "[SETUP] Skipping TTS backend install."
     ;;
   *)
-    echo "Unknown VIDEO_DUBBER_TTS_BACKEND=$TTS_BACKEND. Use mlx, pytorch, or none." >&2
+    echo "Unknown VIDEO_DUBBER_TTS_BACKEND=$TTS_BACKEND. Use qwen3, mlx, pytorch, or none." >&2
     exit 1
     ;;
 esac

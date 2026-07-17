@@ -154,6 +154,7 @@ def write_job_config(job_dir, args, config=None):
         "allow_source_fallback": getattr(args, "allow_source_fallback", False),
         "model_config": args.model_config,
         "tts_engine": args.tts_engine,
+        "qwen3_model": getattr(args, "qwen3_model", None),
         "ref_audio": args.ref_audio,
         "no_segments": args.no_segments,
         "max_atempo": args.max_atempo,

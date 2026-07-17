@@ -9,10 +9,10 @@ models:
   #   api_key: $OPENAI_API_KEY
   #   api_base: https://api.openai.com/v1
 
-  # - name: deepseek
-  #   model: deepseek-v4-pro
-  #   api_key: $DEEPSEEK_API_KEY
-  #   api_base: https://api.deepseek.com
+  - name: deepseek
+    model: deepseek-v4-flash
+    api_key: $DEEPSEEK_API_KEY
+    api_base: https://api.deepseek.com
 
   # - name: ollama
   #   model: qwen3.5:8b

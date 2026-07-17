@@ -3,14 +3,13 @@ name: video-dubber
 description: >
   视频下载、字幕翻译、硬字幕烧录和可选声音克隆配音工具。用户要下载 YouTube/Bilibili/Twitter/X/TikTok
   或本地视频、生成中文/日语/韩语等字幕、保留原声只加字幕、或根据原视频/参考音频克隆声音生成配音视频时使用。
-  默认目标语言是中文；克隆配音时要保持字幕、语音和原视频时间轴同步。
+  默认目标语言是中文、默认声音克隆后端是 Qwen3-TTS；克隆配音时要保持字幕、语音和原视频时间轴同步。
 allowed-tools:
   - Read
   - Write
   - Bash
   - Glob
   - AskUserQuestion
-model: gemini-3.5-flash
 ---
 
 # 视频多语言配音与克隆工具
@@ -29,9 +28,11 @@ model: gemini-3.5-flash
 8. **支持外部参考音频**：用户给 `--ref-audio` 时优先使用它；必须配 `--ref-text`、`--ref-text-file` 或 `--auto-transcribe-ref`。
 9. **长任务低噪声且可续跑**：核心脚本写 `status.json`、`run.log` 和阶段产物。意外中断后，用同一个 `job_dir/status/log` 和相同参数重跑，脚本会复用已完成的视频、ASR、翻译、参考音频和 TTS chunk；Agent 只在阶段变化、失败、完成或用户询问时汇报。
 10. **完成后必须验证**：检查视频/音频流时长、字幕条数、TTS 生成/跳过/错误数，并输出 `verification_report_<lang>_<mode>.json`。
-11. **音色质量优先于盲目重生**：如果已有 `output_cloned_<lang>_<mode>.mp4` 的音色更像原说话人，不要用新的参考片段或长分组全量覆盖。先保留旧版作为音色基线，再用 strict sync 重建字幕和 TTS 文本。
+11. **音色质量优先于盲目重生**：如果已有 `output_cloned_<lang>_<mode>_<engine>.mp4` 的音色更像原说话人，不要用新的参考片段或长分组全量覆盖。先保留旧版作为音色基线，再用 strict sync 重建字幕和 TTS 文本。
 12. **非语音标记不进画面**：`[MUSIC]`、`[音乐]`、`[APPLAUSE]`、`[掌声]`、`music playing` 等只用于判断静音/背景音 gap，必须跳过 TTS，并把 ASS 屏幕字幕写空；不要把方括号提示烧进最终视频。
 13. **原声硬字幕是独立路径**：用户说“不要克隆声音 / 只加中文字幕 / 原声保留 / 只下载并加字幕”时，不要进入参考音频、TTS、voice clone 或 `output_cloned_*` 流程；只生成原音轨硬字幕视频和字幕验证报告。
+14. **Qwen3-TTS 是默认克隆后端**：优先复用已存在的 1.7B BF16 MLX 模型，模型只加载一次并循环生成全部 chunk；F5 保留为显式兼容后端，不再作为默认值。
+15. **多模型产物必须隔离**：chunk、合并音频、对齐报告和克隆视频文件名都带引擎标识，避免 Qwen3-TTS、F5 或后续后端互相覆盖或误命中缓存。
 
 ## 默认字体 Profile
 
@@ -80,10 +81,18 @@ python .agents/skills/video-dubber/scripts/run_pipeline.py \
   --status "$job_dir/status.json" \
   --log "$job_dir/run.log" \
   --target-language Chinese \
+  --translation-model deepseek \
+  --tts-engine qwen3-tts \
   --subtitle-mode target \
   --preserve-gap-audio \
   --no-segments \
   > "$job_dir/stdout.log" 2>&1 &
+```
+
+Qwen3-TTS 模型解析顺序：`--qwen3-model` → `QWEN3_TTS_MODEL` → 本机已知缓存。不要发现模型缺失后静默下载数 GB 权重；先报告并让用户决定是否下载。已验证的本机模型路径可直接传入：
+
+```bash
+--qwen3-model "/Users/hgis/myproject/blender-video-skills/.worktrees/video-highlight/assets/video-highlight-norway-england/commentary_qwen3/models/qwen3/1.7b_bf16"
 ```
 
 通用下载参数：
@@ -138,11 +147,11 @@ python .agents/skills/video-dubber/scripts/run_pipeline.py \
 - `ffmpeg` / `ffprobe`（需要在 `PATH` 中可用）。
 - `yt-dlp`，仅 URL 输入时必需。
 - 字体文件 `assets/fonts/HiraginoSansGB.ttc`。
-- 可用磁盘空间，默认至少 2GB。F5/PyTorch 模型缓存可能占 1.5GB 以上，空间不足时使用 `--no-segments` 并清缓存。
+- 可用磁盘空间，默认至少 2GB。Qwen3-TTS 1.7B BF16 模型和 tokenizer 合计可超过 4GB；优先复用缓存，空间不足时使用 `--no-segments` 并清理失败产物。
 - 设置 `TMPDIR`、`MPLCONFIGDIR`、`XDG_CACHE_HOME`、`HF_HOME` 到 job 目录，避免系统 `/tmp` 或用户 cache 不可写。
 - ASR/TTS 硬件路由要先做 10-15 秒 smoke test：
   - macOS 上 `whisper-cli` 先试 `--no-gpu`。如果默认 Metal 加载后崩溃，不要反复重跑默认命令，直接固定 CPU ASR。
-  - MLX/F5 需要 Metal；沙箱或 headless 环境可能报 `No Metal device available`，这时必须用允许访问 Metal 的外部执行方式跑 TTS。
+  - MLX/Qwen3-TTS 与 MLX/F5 都需要 Metal；沙箱或 headless 环境可能报 `No Metal device available`，这时必须用允许访问 Metal 的外部执行方式跑 TTS。
   - 有 `NVIDIA_API_KEY` 时优先走 NVIDIA Riva gRPC ASR；如果 API、依赖或服务不可用，再回退本地 ASR。
 
 ### 2. 输入准备
@@ -200,7 +209,7 @@ YouTube 高清下载策略：
 
 ### 4. 翻译
 
-首次运行时脚本会计算翻译所需 token 量并暂停确认。看到状态为 `confirm_translation` 时，向用户展示预估 token 数和字幕条数，由用户决定：
+默认翻译配置使用 `deepseek` 别名，对应 `model-config.yaml` 中的 DeepSeek V4 Flash。首次运行时脚本会计算翻译所需 token 量并暂停确认。看到状态为 `confirm_translation` 时，向用户展示预估 token 数和字幕条数，由用户决定：
 - **继续**：加 `--confirm-translation` 重跑
 - **换模型**：改 `--translation-model` 换个便宜的模型
 - **手动翻译**：不配 API key，走 Agent 自身模型翻译（见 [4a](#4a-无-api-key-时的翻译兜底)）
@@ -278,11 +287,14 @@ id|text
 - 如果 TTS 仍略长，优先缩短该段译文、局部提高 TTS speed 或合并相邻窗口；不要拉长视频，也不要让语音读 A 而字幕显示 B。
 - 验证必须报告：分组数、`max_needed_atempo_ratio`、`max_atempo_ratio`、裁切片段数和 `quality_warning`。
 
-F5/MLX 克隆策略：
-- 不要用 CLI 每段单独启动模型生成几十段音频；应写脚本加载一次 `F5TTS.from_pretrained(...)`，循环生成所有 chunk，速度更快也更少出错。
-- 先用 1 条代表性中文长句做 `--speed` smoke test。F5 的 `speed` 对时长很敏感：过慢会让短字幕窗口裁尾，过快会听起来突兀。
-- 长窗口可用较慢速度保留自然度；短窗口风险段可局部提高速度或缩短文本。不要全片固定一个速度后盲目接受大量裁切。
-- TTS chunk 必须落盘并可续跑；重跑时跳过已存在 chunk，局部补丁只重生风险段。
+Qwen3-TTS 默认克隆策略（详细参数见 [qwen3_tts.md](references/qwen3_tts.md)）：
+- 使用 MLX 版本在 Apple Silicon 上推理，加载一次模型后循环生成全部语义段；不要为每段重启 CLI。
+- `Chinese/Japanese/Korean/English` 分别传 `chinese/japanese/korean/english`，不能把日语版本继续用 `chinese`。
+- 参考音频统一为 24kHz 单声道，参考文本必须逐字匹配；同一 A/B 对比复用同一参考音频和文本。
+- chunk 缓存键必须包含目标文本、目标语言、引擎、模型、参考音频、参考文本和对齐参数。不同引擎不能共享 chunk。
+- 先做代表性短句和长句 smoke test。长句超窗时先压短译文或合并语义窗口；局部 `atempo` 是最后适配手段，不能默认靠 2x 以上变速掩盖碎字幕。
+
+F5/MLX 仍可通过 `--tts-engine f5-mlx` 显式使用。它同样应加载一次模型、chunk 落盘可续跑，并只重生风险段。
 
 兼容的逐字幕执行策略：
 - 仅用于纯字幕、调试、或用户明确接受字幕和配音不逐字一致的 voiceover 模式。
@@ -319,15 +331,15 @@ F5/MLX 克隆策略：
 
 ### 7. 字幕烧录和视频导出
 
-默认生成：
+默认生成（克隆文件带引擎后缀，便于 A/B 对比）：
 - `output_original_<lang>_<mode>.mp4`：原音轨 + 指定字幕。
-- `output_cloned_<lang>_<mode>.mp4`：克隆配音 + 可选 BGM + 指定字幕。
+- `output_cloned_<lang>_<mode>_<engine>.mp4`：克隆配音 + 可选 BGM + 指定字幕。
 
-例如中文双语输出为 `output_cloned_zh_bilingual.mp4`，日语单语输出为 `output_cloned_ja_target.mp4`。
+例如 Qwen 中文单语输出为 `output_cloned_zh_target_qwen3tts.mp4`，日语单语输出为 `output_cloned_ja_target_qwen3tts.mp4`。
 
 原声硬字幕 / subtitle-only 模式：
 - 当用户明确不要克隆声音时，流程是 `下载/读取视频 -> 获取或 ASR 源字幕 -> checkpoint 翻译 -> 生成 ASS -> ffmpeg 保留原音轨烧录字幕 -> 验证`。
-- 不要调用 `prepare_reference_audio`、`generate_tts_and_merge`、F5/MLX、音频分离或 gap-audio 混音；不要生成 `output_cloned_*`。
+- 不要调用 `prepare_reference_audio`、`generate_tts_and_merge`、任何 TTS 后端、音频分离或 gap-audio 混音；不要生成 `output_cloned_*`。
 - 输出文件建议命名为 `output_original_<lang>_<mode>.mp4`，并在 `job_config.json` / `status.json` / 验证报告中写明 `clone_voice: false` 和 `tts_engine: none`。
 - 如果现有主流程脚本默认会走 TTS，就用专门的字幕-only 脚本或轻量 Python glue 复用其下载、翻译、ASS 样式函数，避免为了“不要克隆声音”仍然跑参考音频和 TTS。
 
@@ -377,6 +389,7 @@ python .agents/skills/video-dubber/scripts/rebuild_outputs.py \
 TTS 后端切换：
 
 ```bash
+VIDEO_DUBBER_TTS_BACKEND=qwen3 ./scripts/setup_env.sh
 VIDEO_DUBBER_TTS_BACKEND=mlx ./scripts/setup_env.sh
 VIDEO_DUBBER_TTS_BACKEND=pytorch ./scripts/setup_env.sh
 VIDEO_DUBBER_TTS_BACKEND=none ./scripts/setup_env.sh
@@ -386,6 +399,7 @@ VIDEO_DUBBER_TTS_BACKEND=none ./scripts/setup_env.sh
 
 ```bash
 uv pip install -r requirements.txt
+uv pip install -r requirements-qwen3-tts.txt  # 默认 Qwen3-TTS MLX 后端
 uv pip install -r requirements-f5-mlx.txt     # MLX 后端
 uv pip install -r requirements-f5-pytorch.txt  # PyTorch 后端
 ```
@@ -454,6 +468,10 @@ uv pip install -r requirements-f5-pytorch.txt  # PyTorch 后端
 - 不要默认保存所有 chunk；磁盘紧张时会导致 `LibsndfileError`、Python 临时目录不可用或 FFmpeg `+faststart` 失败。
 - 不要强制 `HF_HUB_OFFLINE=1`，除非确认模型已经缓存。
 - 不要默认安装 PyTorch F5；它体积大，应与 MLX 路径拆开。
+- 不要每次任务重新下载 Qwen3-TTS；先检查 `--qwen3-model`、`QWEN3_TTS_MODEL` 和已知缓存。
+- 不要让不同 TTS 引擎共用 `chunk_zh_0001.wav` 或无引擎后缀的最终视频；模型切换后这会产生静默缓存污染。
+- 日语和中文译文长度分布不同；日语风险段必须根据对齐报告单独压短，不能直接沿用中文的变速阈值结论。
+- 不要把 job 放在易被系统清理的 `/private/tmp`；下载、翻译和 TTS 长任务使用项目内 `.agent/jobs/<job-id>` 稳定目录。
 - 不要把音色更差的新版本当成升级版覆盖旧版本；旧版音色好时应保留，并把新修复做成 v2/v3 文件便于 A/B 对比。
 - 不要看到 `whisper-cli` Metal 崩溃就误判模型坏了；先加 `--no-gpu` 做 CPU ASR smoke test。
 - 不要让短窗口中文段使用全片慢速 TTS 后再裁尾；这会重新制造“句子不完整”。短窗口要先缩短文本或局部提高 TTS speed。

@@ -8,6 +8,7 @@ pysubs2==1.8.0
 python-dotenv
 pydub
 soundfile
+numpy
 
 # Audio Separation
 audio-separator

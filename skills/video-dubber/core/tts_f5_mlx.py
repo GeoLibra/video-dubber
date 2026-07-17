@@ -13,7 +13,7 @@ class F5MlxBackend(TTSBackend):
     def name(self):
         return "f5-mlx"
 
-    def synthesize(self, text, ref_audio, ref_text, output_path, hf_offline=False):
+    def synthesize(self, text, ref_audio, ref_text, output_path, hf_offline=False, **kwargs):
         out = Path(output_path)
         if out.exists():
             return str(out)

@@ -1,0 +1,3 @@
+# Apple Silicon Qwen3-TTS voice-cloning route.
+# Tested with the local 1.7B BF16 model and mlx-audio 0.4.5.
+mlx-audio==0.4.5

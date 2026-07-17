@@ -85,6 +85,7 @@ def _apply_cli_overrides(cfg, args):
         },
         "tts": {
             "engine": getattr(args, "tts_engine", None),
+            "qwen3_model": getattr(args, "qwen3_model", None),
             "max_atempo": getattr(args, "max_atempo", None),
             "max_clip_ms": getattr(args, "max_clip_ms", None),
             "max_overhang_ms": getattr(args, "max_overhang_ms", None),

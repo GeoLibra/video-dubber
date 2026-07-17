@@ -81,7 +81,7 @@ def parse_args():
     parser.add_argument("--profile", default=None, help="Path to YAML profile override.")
     parser.add_argument("--target-language", default="Chinese")
     parser.add_argument("--source-lang", default="en")
-    parser.add_argument("--translation-model", default="gemini-3.5-flash")
+    parser.add_argument("--translation-model", default="deepseek")
     parser.add_argument("--translation-batch-size", type=int, default=25)
     parser.add_argument("--translation-workers", type=int, default=1)
     parser.add_argument("--allow-source-fallback", action="store_true")
@@ -92,7 +92,9 @@ def parse_args():
     parser.add_argument("--ref-text-file")
     parser.add_argument("--auto-transcribe-ref", action="store_true")
     parser.add_argument("--whisper-model")
-    parser.add_argument("--tts-engine", choices=["f5-mlx", "none"], default="f5-mlx")
+    parser.add_argument("--tts-engine", choices=["qwen3-tts", "f5-mlx", "none"], default="qwen3-tts")
+    parser.add_argument("--qwen3-model", default=None,
+                        help="Local Qwen3-TTS MLX model path or compatible model id.")
     parser.add_argument("--skip-separation", action="store_true")
     parser.add_argument("--no-segments", action="store_true")
     parser.add_argument("--hf-offline", action="store_true")
@@ -269,7 +271,7 @@ def main():
             meter.log_tts(tts_chars)
             meter.phase_end()
 
-        if args.preserve_gap_audio and not no_vocals_path:
+        if args.tts_engine != "none" and args.preserve_gap_audio and not no_vocals_path:
             tts_audio = add_gap_audio(tts_audio, audio_path, subs_translated, job_dir, video_duration_s, args)
 
         meter.phase_start("synthesis")

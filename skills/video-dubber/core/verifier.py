@@ -32,7 +32,10 @@ def verify_outputs(video_path, cloned_path, subs, tts_report, out_dir, args):
             "tts_quality_warning_indexes": [x["index"] for x in warned[:20]],
         })
 
-    report_path = Path(out_dir) / f"verification_report_{lang_slug(args.target_language)}_{args.subtitle_mode}.json"
+    engine_suffix = "" if is_subtitle_only else f"_{args.tts_engine.replace('-', '')}"
+    report_path = Path(out_dir) / (
+        f"verification_report_{lang_slug(args.target_language)}_{args.subtitle_mode}{engine_suffix}.json"
+    )
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     if not is_subtitle_only and report.get("tts_errors"):
         raise RuntimeError(f"TTS errors found: {report['tts_errors']}. See {report_path}")

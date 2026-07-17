@@ -11,9 +11,12 @@
 *   **ASR (Whisper) [Fallback]**: 
     *   **首选**: [ml-explore/mlx-examples (Whisper)](https://github.com/ml-explore/mlx-examples/tree/main/whisper)
     *   **优势**: 苹果官方维护，原生 MLX 极速推理。
-*   **TTS (F5-TTS)**:
+*   **TTS (Qwen3-TTS，默认)**:
+    *   **首选**: `mlx-audio` + 本地 Qwen3-TTS 1.7B BF16 模型。
+    *   **优势**: 中文和日语声音克隆效果已在完整视频上验证；模型可单次加载、循环生成并断点续跑。
+*   **TTS (F5-TTS，兼容)**:
     *   **首选**: [lucasnewman/f5-tts-mlx](https://github.com/lucasnewman/f5-tts-mlx)
-    *   **优势**: 完美适配 MLX，并且有 `f5-tts-mlx-quantized` 量化版本，VRAM 消耗可压至极低（约 400MB）。
+    *   **用途**: 用户显式要求 F5 或需要与旧版本做音色对比时使用。
 *   **TTS (CosyVoice)**:
     *   **首选**: 官方仓库结合 MPS (目前 MLX 生态对 CosyVoice 的支持尚在早期，需使用 PyTorch MPS 后端)。
 *   **Lip-Sync (MuseTalk)**:

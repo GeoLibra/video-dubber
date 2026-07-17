@@ -9,7 +9,7 @@ general:
   font_file: null  # null = 使用内置字体
 
 translation:
-  model: gemini-3.5-flash
+  model: deepseek
   batch_size: 25
   workers: 1
   allow_source_fallback: false
@@ -33,7 +33,8 @@ asr:
   skip_separation: false
 
 tts:
-  engine: f5-mlx
+  engine: qwen3-tts
+  qwen3_model: null  # null = --qwen3-model / QWEN3_TTS_MODEL / 已知本机缓存
   max_atempo: 1.6
   max_clip_ms: 80
   max_overhang_ms: 450

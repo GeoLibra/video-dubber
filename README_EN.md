@@ -16,7 +16,7 @@
 
 <br/>
 
-Supports **YouTube / Bilibili / Twitter/X / TikTok** and other online video platforms, as well as local video files. The default target language is **Chinese**; you can also specify Japanese, Korean, etc.
+Supports **YouTube / Bilibili / Twitter/X / TikTok** and other online video platforms, as well as local video files. The default target language is **Chinese** and the default voice-cloning backend is **Qwen3-TTS**; you can also specify Japanese, Korean, etc.
 
 ---
 
@@ -42,6 +42,8 @@ Supports **YouTube / Bilibili / Twitter/X / TikTok** and other online video plat
 | ❤️ **Heartbeat monitoring** | Long-running tasks log stage progress so you can find and handle stuck stages. |
 | 🏷️ **Platform subtitles first** | Use platform subtitles when available to reduce ASR time and errors. |
 | 🚀 **NVIDIA Riva first** | With `NVIDIA_API_KEY`, ASR prioritizes NVIDIA Riva gRPC, falling back to local Whisper. |
+| 🤖 **Qwen3-TTS by default** | MLX on Apple Silicon, one model load for all chunks, with model-specific resumable caches. |
+| 🧪 **Comparable model outputs** | Qwen3-TTS and F5 outputs use engine suffixes and alignment reports, so they do not overwrite each other. |
 | 🔇 **Original/dubbing separation** | Can produce original-audio hard-subtitled output without running voice cloning. |
 | ✅ **Verifiable output** | Each run writes a verification report with duration, subtitle count, and dubbing status. |
 
@@ -108,9 +110,9 @@ Video Dubber supports delegating subtitle translation to a dedicated translation
 
 | Provider | Model | Config |
 | --- | --- | --- |
-| 🌟 **Google Gemini** (default) | `gemini-3.5-flash` | `GEMINI_API_KEY` |
+| 🧠 **DeepSeek V4 Flash** (default) | `deepseek-v4-flash` | `DEEPSEEK_API_KEY` |
+| 🌟 **Google Gemini** | `gemini-3.5-flash` | `GEMINI_API_KEY` |
 | 🤖 **OpenAI** | `gpt-4o` | `OPENAI_API_KEY` |
-| 🧠 **DeepSeek** | `deepseek-v4-pro` | `DEEPSEEK_API_KEY` |
 | 🏠 **Ollama (local)** | `qwen3.5:8b` | No API Key needed |
 | 🟢 **NVIDIA hosted** | kimi-k2.6 / deepseek-v4 etc. | `NVIDIA_API_KEY` |
 
@@ -135,7 +137,7 @@ GEMINI_API_KEY=your_gemini_key
 # NVIDIA_API_KEY=your_nvidia_key
 ```
 
-> 💡 **Only one key needed!** Gemini is the default. If you prefer another provider, fill in the corresponding key and edit `model-config.yaml`.
+> 💡 **Only one key needed!** DeepSeek V4 Flash is the default. Without an API key, the script saves `source_raw.srt` for Agent-assisted translation after confirmation.
 
 #### Step 2 (optional): Switch translation model
 
@@ -143,7 +145,13 @@ Edit `model-config.yaml` and uncomment the provider you want:
 
 ```yaml
 models:
-  # Google Gemini (default, recommended)
+  # DeepSeek V4 Flash (default)
+  - name: deepseek
+    model: deepseek-v4-flash
+    api_key: $DEEPSEEK_API_KEY
+    api_base: https://api.deepseek.com
+
+  # Google Gemini
   - name: gemini
     model: gemini-3.5-flash
     api_key: $GEMINI_API_KEY
@@ -154,12 +162,6 @@ models:
   #   model: gpt-4o
   #   api_key: $OPENAI_API_KEY
   #   api_base: https://api.openai.com/v1
-
-  # DeepSeek
-  # - name: deepseek
-  #   model: deepseek-v4-pro
-  #   api_key: $DEEPSEEK_API_KEY
-  #   api_base: https://api.deepseek.com
 
   # Ollama (local, zero cost, no API key)
   # - name: ollama
@@ -211,8 +213,8 @@ After installing the skill, tell the Agent what you want in natural language:
 
 ```text
 output_original_<lang>_<mode>.mp4   # original audio + hard subtitles
-output_cloned_<lang>_<mode>.mp4     # cloned dubbing + hard subtitles
-verification_report_<lang>_<mode>.json   # verification report
+output_cloned_<lang>_<mode>_<engine>.mp4     # cloned dubbing + hard subtitles
+verification_report_<lang>_<mode>_<engine>.json   # verification report
 ```
 
 The verification report records output duration, subtitle count, and dubbing status.
@@ -230,3 +232,14 @@ The verification report records output duration, subtitle count, and dubbing sta
 | Browser login state | "Use Chrome cookies to download" |
 | Playlist range | "Download videos 1 to 10" |
 | Auto-detect source language | "Auto-detect the source language" |
+
+### Qwen3-TTS voice cloning
+
+The default backend is `qwen3-tts`. The model is resolved from `--qwen3-model`, then `QWEN3_TTS_MODEL`, then known local cache locations.
+
+```bash
+export QWEN3_TTS_MODEL="/path/to/qwen3/1.7b_bf16"
+VIDEO_DUBBER_TTS_BACKEND=qwen3 ./skills/video-dubber/scripts/setup_env.sh
+```
+
+Use `--tts-engine qwen3-tts` (default), `--tts-engine f5-mlx` (F5), or `--tts-engine none` (subtitles only). Qwen3-TTS supports Chinese, Japanese, and Korean; Japanese synthesis uses the `japanese` language code. Example: `output_cloned_ja_target_qwen3tts.mp4`.

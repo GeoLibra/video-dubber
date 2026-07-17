@@ -5,6 +5,12 @@ from .media import FFMPEG, run, escape_filter_path
 from .prereqs import resolve_font
 
 
+def _is_current(output, inputs):
+    output = Path(output)
+    paths = [Path(p) for p in inputs if p]
+    return output.exists() and paths and output.stat().st_mtime >= max(p.stat().st_mtime for p in paths)
+
+
 def ass_filter(ass_path, args):
     font_dir = resolve_font(args.font_file).parent
     return f"ass='{escape_filter_path(ass_path)}':fontsdir='{escape_filter_path(font_dir)}'"
@@ -13,10 +19,11 @@ def ass_filter(ass_path, args):
 def synthesize_videos(video_path, no_vocals_path, tts_audio, ass_path, out_dir, video_duration_s, args):
     suffix = f"{lang_slug(args.target_language)}_{args.subtitle_mode}"
     out_orig = Path(out_dir) / f"output_original_{suffix}.mp4"
-    out_cloned = Path(out_dir) / f"output_cloned_{suffix}.mp4"
+    engine_slug = args.tts_engine.replace("-", "")
+    out_cloned = Path(out_dir) / f"output_cloned_{suffix}_{engine_slug}.mp4"
     vf = ass_filter(ass_path, args)
 
-    if not out_orig.exists():
+    if not _is_current(out_orig, [video_path, ass_path]):
         run([
             FFMPEG, "-hide_banner", "-loglevel", "error", "-y",
             "-i", video_path,
@@ -29,7 +36,7 @@ def synthesize_videos(video_path, no_vocals_path, tts_audio, ass_path, out_dir, 
     if args.tts_engine == "none":
         return str(out_orig), str(out_orig)
 
-    if not out_cloned.exists():
+    if not _is_current(out_cloned, [video_path, ass_path, tts_audio, no_vocals_path]):
         if no_vocals_path:
             cmd = [
                 FFMPEG, "-hide_banner", "-loglevel", "error", "-y",
