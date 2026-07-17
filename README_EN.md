@@ -3,6 +3,15 @@
 <p align="center"><a href="README.md">中文</a> | <b>English</b></p>
 
 <p align="center">
+  <a href="#installation--environment"><img src="https://img.shields.io/badge/Install-Supported-4c78a8" alt="Install"></a>
+  <a href="#features"><img src="https://img.shields.io/badge/Video%20Download-Supported-4c78a8" alt="Video Download"></a>
+  <a href="#features"><img src="https://img.shields.io/badge/Subtitle%20Translation-Multilingual-70ad47" alt="Subtitle Translation"></a>
+  <a href="#features"><img src="https://img.shields.io/badge/Voice%20Cloning-Qwen3--TTS-f28e2b" alt="Voice Cloning"></a>
+  <a href="#installation--environment"><img src="https://img.shields.io/badge/Hard%20Subtitles-Burn--in-d9534f" alt="Hard Subtitles"></a>
+  <a href="#translation-model-configuration"><img src="https://img.shields.io/badge/API-Optional-7b3294" alt="API"></a>
+</p>
+
+<p align="center">
   <a href="#"><img src="https://img.shields.io/badge/Dubbing-Supported-blue" alt="Dubbing"></a>
   <a href="#"><img src="https://img.shields.io/badge/Subtitle%20Translation-Multilingual-green" alt="Translation"></a>
   <a href="#"><img src="https://img.shields.io/badge/Voice%20Cloning-Supported-orange" alt="Voice Cloning"></a>
@@ -20,7 +29,7 @@ Supports **YouTube / Bilibili / Twitter/X / TikTok** and other online video plat
 
 ---
 
-## ✨ Feature Overview
+## ✨ Features
 
 | Scenario | Result |
 | --- | --- |
@@ -70,7 +79,9 @@ flowchart LR
 
 ---
 
-## 🚀 Installation
+## 🚀 Installation & Environment
+
+### 1. Install the Skill
 
 Install via the [`npx skills`](https://github.com/vercel-labs/skills) CLI to any compatible agent (OpenCode, Claude Code, Cursor, etc.):
 
@@ -87,6 +98,73 @@ npx skills add GeoLibra/video-dubber -g --full-depth -y
 ```
 
 After installation, the Agent will automatically check and prepare the runtime environment — no manual steps needed.
+
+If you have cloned this repository, you can also run:
+
+```bash
+chmod +x install.sh
+./install.sh
+```
+
+The installer prepares the runtime environment for `skills/video-dubber`. To register the Skill without running the environment setup immediately:
+
+```bash
+npx skills add ./skills/video-dubber -a codex -g
+```
+
+### 2. System dependencies
+
+Make sure these commands are available before running a job:
+
+| Dependency | Purpose | Required |
+| --- | --- | --- |
+| Python 3.10+ | Download, ASR, translation, and rendering scripts | Yes |
+| `ffmpeg` / `ffprobe` | Audio extraction, mixing, hard subtitles, and verification | Yes |
+| `yt-dlp` | Download online videos | URL input only |
+| Whisper / `faster-whisper` | ASR when platform subtitles are unavailable | Required without source subtitles |
+| Apple Silicon + MLX | Local Qwen3-TTS voice cloning | Recommended for cloned dubbing |
+
+Quick check:
+
+```bash
+python --version
+ffmpeg -version
+ffprobe -version
+yt-dlp --version
+```
+
+### 3. Environment variables and API keys
+
+Copy the example configuration:
+
+```bash
+cp skills/video-dubber/.env.example skills/video-dubber/.env
+```
+
+Choose at least one translation route:
+
+| Variable / service | Purpose | API key |
+| --- | --- | --- |
+| `DEEPSEEK_API_KEY` | Default subtitle translation model | Required |
+| `GEMINI_API_KEY` | Gemini subtitle translation | Required |
+| `OPENAI_API_KEY` | OpenAI-compatible translation endpoint | Required |
+| `NVIDIA_API_KEY` | NVIDIA hosted translation or Riva ASR | Required |
+| Ollama | Local subtitle translation | Not required |
+| `QWEN3_TTS_MODEL` | Local Qwen3-TTS model directory | No key; model required for cloning |
+
+Example:
+
+```ini
+# skills/video-dubber/.env
+DEEPSEEK_API_KEY=your_key_here
+# GEMINI_API_KEY=your_key_here
+# NVIDIA_API_KEY=your_key_here
+QWEN3_TTS_MODEL=/absolute/path/to/qwen3/1.7b_bf16
+```
+
+Never commit `.env`, browser cookies, or model access tokens. Without a translation API key, the task keeps `source_raw.srt` so the Agent or a human can translate it and resume.
+
+### 4. Translation model configuration
 
 ### Let your Agent install it
 
@@ -116,7 +194,7 @@ Video Dubber supports delegating subtitle translation to a dedicated translation
 | 🏠 **Ollama (local)** | `qwen3.5:8b` | No API Key needed |
 | 🟢 **NVIDIA hosted** | kimi-k2.6 / deepseek-v4 etc. | `NVIDIA_API_KEY` |
 
-### Quick Setup (Two Steps)
+#### Quick Setup (Two Steps)
 
 <details>
 <summary><b>📋 Click to expand detailed setup</b></summary>
