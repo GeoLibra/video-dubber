@@ -212,8 +212,16 @@ def apply_translations_to_subs(subs, translations, subtitle_mode, target_languag
     for idx, sub in enumerate(subs):
         item = translations.get(idx, {})
         original = get_sub_source_text(sub)
-        display_raw = item.get("display_text") or original
-        tts_raw = item.get("tts_text") or display_raw
+        if subtitle_mode == "source":
+            display_raw = original
+            tts_raw = original
+        else:
+            display_raw = item.get("display_text")
+            if not is_non_speech(original) and (
+                not isinstance(display_raw, str) or not display_raw.strip()
+            ):
+                raise ValueError(f"subtitle {idx} is missing a valid display_text")
+            tts_raw = item.get("tts_text") or display_raw
         if is_non_speech(display_raw) or is_non_speech(original):
             sub.display_text = ""
             sub.tts_text = normalize_spaces(tts_raw)

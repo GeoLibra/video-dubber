@@ -5,7 +5,15 @@ from .lang import slug as lang_slug
 from .media import probe_streams
 
 
-def verify_outputs(video_path, cloned_path, subs, tts_report, out_dir, args):
+def verify_outputs(
+    video_path,
+    cloned_path,
+    subs,
+    tts_report,
+    out_dir,
+    args,
+    translation_context_info=None,
+):
     is_subtitle_only = args.tts_engine == "none"
     atempo_ratios = [x.get("atempo_ratio", 1.0) for x in tts_report if "atempo_ratio" in x]
     clipped = [x for x in tts_report if x.get("cropped_ms", 0) > 0]
@@ -31,6 +39,26 @@ def verify_outputs(video_path, cloned_path, subs, tts_report, out_dir, args):
             "tts_quality_warning_count": len(warned),
             "tts_quality_warning_indexes": [x["index"] for x in warned[:20]],
         })
+
+    if translation_context_info:
+        report.update(
+            {
+                "translation_context_path": translation_context_info.get(
+                    "translation_context_path"
+                ),
+                "timing_risks_path": translation_context_info.get("timing_risks_path"),
+                "warnings": list(translation_context_info.get("warnings", [])),
+                "timing_counts": dict(
+                    translation_context_info.get(
+                        "timing_counts",
+                        {"normal": 0, "warning": 0, "critical": 0},
+                    )
+                ),
+                "max_required_speed_ratio": translation_context_info.get(
+                    "max_required_speed_ratio", 0.0
+                ),
+            }
+        )
 
     engine_suffix = "" if is_subtitle_only else f"_{args.tts_engine.replace('-', '')}"
     report_path = Path(out_dir) / (

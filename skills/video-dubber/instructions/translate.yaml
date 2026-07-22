@@ -1,5 +1,5 @@
 # 翻译指令模板
-# {language}、{target_language}、{display_rule}、{lines} 由代码动态注入
+# Prompt fields are injected by core/translate.py.
 
 system: |
   You are a professional translator specializing in audiovisual media. Translate the given subtitle segments into {language}.
@@ -11,13 +11,31 @@ display_rule_compact: "display_text: concise natural subtitle text; punctuation 
 user_template: |-
   Translate these subtitle lines into natural spoken {target_language}.
   Return strict JSON:
-  {{"translations":[{{"id":0,"display_text":"subtitle text","tts_text":"natural TTS text"}}]}}
+  {{"translations":[{{"id":0,"display_text":"subtitle text"}}]}}
 
   Rules:
   - Preserve every id exactly.
   - {display_rule}
-  - tts_text: natural spoken language for voiceover; keep meaning but make it easy to say.
   - Keep technical proper nouns in English when appropriate.
 
-  Input:
+  === VIDEO CONTEXT ===
+  {video_context}
+
+  === TERMINOLOGY ===
+  Follow these source => target choices when they occur:
+  {terminology}
+
+  === REFERENCE ONLY ===
+  These neighboring lines are context only.
+  Do not translate or return reference ids.
+  {reference_lines}
+
+  === TIMING BUDGET ===
+  Each translation must fit its existing subtitle window.
+  Values are id|available milliseconds:
+  {timing_budgets}
+
+  === TRANSLATE THESE IDS ===
+  Return translations only for ids: {active_ids}.
+  Active input is serialized as id|text:
   {lines}
