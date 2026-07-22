@@ -51,6 +51,14 @@ def build_config(cli_args, overlay_path=None):
 
 def _apply_cli_overrides(cfg, args):
     """将 CLI 参数值写入配置结构。args 为 argparse.Namespace。"""
+    explicit_options = getattr(args, "_explicit_cli_options", None)
+
+    def cli_value(name, *options):
+        value = getattr(args, name, None)
+        if explicit_options is not None and not any(option in explicit_options for option in options):
+            return None
+        return value
+
     overrides = {
         "general": {
             "target_language": getattr(args, "target_language", None),
@@ -67,6 +75,17 @@ def _apply_cli_overrides(cfg, args):
             "confirm": getattr(args, "confirm_translation", None),
             "env_file": getattr(args, "env_file", None),
             "model_config": getattr(args, "model_config", None),
+            "terms_file": cli_value("terms_file", "--terms-file"),
+            "context": cli_value("translation_context", "--translation-context"),
+            "context_char_budget": cli_value("context_char_budget", "--context-char-budget"),
+            "context_neighbor_lines": cli_value(
+                "context_neighbor_lines", "--context-neighbor-lines"
+            ),
+            "timing_risk_estimator": cli_value(
+                "timing_risk_estimator",
+                "--timing-risk-estimator",
+                "--no-timing-risk-estimator",
+            ),
         },
         "download": {
             "format": getattr(args, "download_format", None),

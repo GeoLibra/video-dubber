@@ -29,7 +29,7 @@ from core.source_loader import download_video, separate_audio, build_yt_dlp_cmd
 from core.media import probe_duration, run as media_run
 from core.speech import transcribe_audio
 from core.lang import normalize_name, slug as lang_slug
-from core.subtitle import source_hash, get_sub_source_text
+from core.subtitle import get_sub_source_text
 from core.translate import translate_subtitles
 from core.audio_builder import prepare_reference_audio, generate_and_merge, add_gap_audio
 from core.video_builder import synthesize_videos
@@ -69,8 +69,45 @@ def write_job_config(job_dir, args):
     return _write(job_dir, args)
 
 
+def apply_translation_config(args, config):
+    """Apply merged profile/CLI translation settings to runtime arguments."""
+    translation = config.get("translation", {})
+    context_mode = translation.get("context", "auto")
+    if isinstance(context_mode, bool):
+        context_mode = "auto" if context_mode else "off"
+    if context_mode not in {"auto", "off"}:
+        raise ValueError("translation.context must be 'auto' or 'off'")
+
+    budget = int(translation.get("context_char_budget", 8000))
+    neighbors = int(translation.get("context_neighbor_lines", 2))
+    if budget <= 0:
+        raise ValueError("translation.context_char_budget must be > 0")
+    if neighbors < 0:
+        raise ValueError("translation.context_neighbor_lines must be >= 0")
+
+    terms_file = translation.get("terms_file")
+    if terms_file:
+        terms_path = Path(terms_file).expanduser()
+        if not terms_path.is_file():
+            raise ValueError(f"translation.terms_file must exist and be a file: {terms_path}")
+        terms_file = str(terms_path)
+
+    args.terms_file = terms_file
+    args.translation_context = context_mode
+    args.context_char_budget = budget
+    args.context_neighbor_lines = neighbors
+    args.timing_risk_estimator = bool(translation.get("timing_risk_estimator", True))
+    args.translation_timing = translation.get("timing", {})
+    return args
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
+    explicit_options = {
+        token.split("=", 1)[0]
+        for token in sys.argv[1:]
+        if token.startswith("--")
+    }
     parser.add_argument("--url")
     parser.add_argument("--input-video")
     parser.add_argument("--source-srt")
@@ -84,6 +121,20 @@ def parse_args():
     parser.add_argument("--translation-model", default="deepseek")
     parser.add_argument("--translation-batch-size", type=int, default=25)
     parser.add_argument("--translation-workers", type=int, default=1)
+    parser.add_argument("--terms-file")
+    parser.add_argument(
+        "--translation-context", choices=["auto", "off"], default="auto"
+    )
+    parser.add_argument("--context-char-budget", type=int, default=8000)
+    parser.add_argument("--context-neighbor-lines", type=int, default=2)
+    timing_group = parser.add_mutually_exclusive_group()
+    timing_group.add_argument(
+        "--timing-risk-estimator", dest="timing_risk_estimator", action="store_true"
+    )
+    timing_group.add_argument(
+        "--no-timing-risk-estimator", dest="timing_risk_estimator", action="store_false"
+    )
+    parser.set_defaults(timing_risk_estimator=True)
     parser.add_argument("--allow-source-fallback", action="store_true")
     parser.add_argument("--confirm-translation", action="store_true")
     parser.add_argument("--subtitle-mode", choices=["bilingual", "target", "source"], default="target")
@@ -130,11 +181,18 @@ def parse_args():
     parser.add_argument("--gap-pad-ms", type=int, default=60)
     parser.add_argument("--cost-out", default=None, help="Path to write cost summary JSON.")
     args = parser.parse_args()
+    args._explicit_cli_options = explicit_options
     args.target_language = normalize_name(args.target_language)
     if args.max_atempo < 1.0:
         parser.error("--max-atempo must be >= 1.0.")
     if args.max_clip_ms < 0 or args.max_overhang_ms < 0:
         parser.error("--max-clip-ms and --max-overhang-ms must be >= 0.")
+    if args.context_char_budget <= 0:
+        parser.error("--context-char-budget must be > 0.")
+    if args.context_neighbor_lines < 0:
+        parser.error("--context-neighbor-lines must be >= 0.")
+    if args.terms_file and not Path(args.terms_file).expanduser().is_file():
+        parser.error("--terms-file must exist and be a file.")
     if args.list_formats and not args.url:
         parser.error("--list-formats requires --url.")
     if not args.url and not args.input_video:
@@ -151,6 +209,7 @@ def main():
         load_dotenv(".env")
 
     config = build_config(args, overlay_path=args.profile)
+    apply_translation_config(args, config)
 
     job_dir = Path(args.status).resolve().parent
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -220,25 +279,20 @@ def main():
 
         meter.phase_start("translation")
         update_status(args.status, "running", "translating", stage="translation", stage_timeout_min=15)
-        ass_path, subs_translated, _translations = translate_subtitles(subs, job_dir, args)
+        ass_path, subs_translated, _translations, translation_context_info = translate_subtitles(
+            subs, job_dir, args
+        )
         if ass_path is None:
             slug = lang_slug(args.target_language)
             meta_path = job_dir / f"translations_{slug}.json"
             raw_srt_path = job_dir / "source_raw.srt"
-            sub_hash = source_hash(subs)
-            cache_meta_path = job_dir / f"translations_{slug}.meta.json"
-            expected_cache = {
-                "source_hash": sub_hash,
-                "target_language": args.target_language,
-                "translation_model": args.translation_model,
-            }
-            cache_meta_path.write_text(json.dumps(expected_cache, ensure_ascii=False, indent=2), encoding="utf-8")
             update_status(
                 args.status, "awaiting_translation",
                 f"No API key configured. Raw SRT saved to {raw_srt_path}. "
                 f"Translate and save results to {meta_path}, then re-run.",
                 raw_srt=str(raw_srt_path),
                 translations_cache=str(meta_path),
+                **translation_context_info,
             )
             log(
                 f"No translation model configured.\n"
@@ -250,6 +304,12 @@ def main():
                 "TRANSLATE",
             )
             sys.exit(0)
+        log(
+            f"Timing risks: {translation_context_info['timing_counts']}; "
+            f"max ratio={translation_context_info['max_required_speed_ratio']:.3f}; "
+            f"report={translation_context_info['timing_risks_path']}",
+            "TRANSLATE",
+        )
         meter.phase_end()
 
         if args.tts_engine == "none":
@@ -284,7 +344,13 @@ def main():
         meter.phase_start("verify")
         update_status(args.status, "running", "verifying outputs", stage="verify")
         verification_path, verification = verify_outputs(
-            video_path, out_cloned, subs_translated, tts_report, job_dir, args
+            video_path,
+            out_cloned,
+            subs_translated,
+            tts_report,
+            job_dir,
+            args,
+            translation_context_info,
         )
         meter.phase_end()
 
@@ -305,6 +371,7 @@ def main():
             verification_report=verification_path,
             verification=verification,
             cost=cost_summary,
+            **translation_context_info,
         )
         log(f"Done\nOriginal: {out_orig}\nCloned: {out_cloned}\nVerification: {verification_path}", "DONE")
     except Exception as exc:

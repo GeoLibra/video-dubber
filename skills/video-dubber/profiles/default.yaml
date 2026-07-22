@@ -16,6 +16,17 @@ translation:
   confirm: false
   env_file: null
   model_config: null
+  terms_file: null
+  context: auto
+  context_char_budget: 8000
+  context_neighbor_lines: 2
+  timing_risk_estimator: true
+  timing:
+    cjk_chars_per_second: 4.0
+    latin_words_per_second: 2.5
+    punctuation_pause_seconds: 0.12
+    warning_ratio: 1.25
+    critical_ratio: 1.6
 
 download:
   format: "bv*[height<=1080]+ba/best[height<=1080]/bv*+ba/best"

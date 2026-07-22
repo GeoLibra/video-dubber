@@ -89,6 +89,22 @@ python .agents/skills/video-dubber/scripts/run_pipeline.py \
   > "$job_dir/stdout.log" 2>&1 &
 ```
 
+翻译上下文与术语参数：
+
+```bash
+--terms-file terms.yaml              # JSON/YAML 术语表；路径必须存在
+--translation-context auto           # auto（默认）或 off
+--context-char-budget 8000           # 全片上下文采样字符上限，必须 > 0
+--context-neighbor-lines 2           # 每批前后参考字幕行数，必须 >= 0
+--timing-risk-estimator              # 默认开启，只报告时间风险
+--no-timing-risk-estimator           # 禁用时间风险报告
+```
+
+这些参数也可以写入 `--profile` 的 `translation` 段：`terms_file`、`context`、
+`context_char_budget`、`context_neighbor_lines`、`timing_risk_estimator`。显式 CLI
+参数优先于 profile；profile 优先于默认值。自动上下文只在用户确认翻译后生成，不得在
+`confirm_translation` 阶段提前调用模型。
+
 Qwen3-TTS 模型解析顺序：`--qwen3-model` → `QWEN3_TTS_MODEL` → 本机已知缓存。不要发现模型缺失后静默下载数 GB 权重；先报告并让用户决定是否下载。已验证的本机模型路径可直接传入：
 
 ```bash
@@ -232,6 +248,17 @@ id|text
 
 脚本保存 `translations_<lang>.json`，并生成 `subtitles_<lang>_<mode>.ass`。
 
+翻译确认后还会生成以下诊断产物：
+- `translation_context_<lang>.json`：全片摘要、自动/用户术语和可审计 provenance。
+- `translation_timing_risks_<lang>.json`：每条译文在原字幕窗口内的预估语速风险；使用
+  `--no-timing-risk-estimator` 时不生成。
+
+`--translation-context off` 只关闭自动摘要/术语模型请求，用户通过 `--terms-file` 提供的
+术语仍会进入上下文产物和批次提示。自动上下文请求失败时翻译继续，用户术语仍保留，
+失败原因写入 `warnings`；无翻译 API key 时进入 `awaiting_translation`，状态仍必须包含
+上下文路径、空的 timing-risk 路径、warnings 和零风险计数。任何 JSON 产物都不得序列化
+API key。
+
 长字幕翻译必须 checkpoint：
 - 每批翻译成功后立刻写入 `translations_<lang>.json` 和 `status.json`，不要等全部批次完成才落盘；长视频中断或 API 卡住时，内存累计会丢掉已完成批次。
 - 重跑时读取 hash 匹配的已有翻译缓存，只请求缺失 id。缓存 key 读入后要转回整数；hash 或模型不匹配时先备份旧缓存，再开始新缓存。
@@ -244,6 +271,8 @@ id|text
 - 只使用 `display_text` 生成屏幕字幕和 TTS。
 - `tts_text` 必须等于 `display_text`，或直接忽略 `tts_text`。
 - 如果翻译缓存里 `display_text != tts_text`，不要直接用于配音；先生成 strict-sync 文本。
+- 主流程加载旧翻译缓存时会把 `tts_text` 归一化为 `display_text` 并原子写回；上下文或术语
+  改变会使旧翻译缓存失效，不能绕过 strict-sync 归一化。
 只有用户明确要求“自然解说/旁白优先，不要求字幕逐字一致”时，才允许使用更长的 `tts_text`。
 
 读取 JSON 翻译缓存时必须把 key 转回整数。JSON 会把 `{0: ...}` 保存成 `{"0": ...}`，如果不恢复为 int，缓存命中后会取不到翻译，导致字幕/TTS 回退到原文。
@@ -281,6 +310,9 @@ id|text
 ### 6. TTS 和时间轴对齐
 
 默认 strict sync 执行策略：
+- timing-risk estimator 仅用于报告和指导压短译文、合并语义窗口或局部语速调整；它绝不
+  修改 `sub.start` / `sub.end`，也不能用来推迟后续字幕。源字幕时间戳在翻译前后必须
+  byte-equivalent。
 - 不逐原始字幕小片段生成 TTS。YouTube 自动字幕经常有 0.5s、0.8s、1.2s 的碎片，中文 TTS 无法自然说完。
 - 先把相邻字幕合并成语义段：合并到窗口至少约 3.2s，且估算中文语速能在窗口内说完。短句如“好的/拜拜/或者是下周”必须并入前后句。
 - 每个语义段只生成一条字幕和一条 TTS，字幕文本与 TTS 文本完全一致。
@@ -366,6 +398,8 @@ python .agents/skills/video-dubber/scripts/rebuild_outputs.py \
 - 配音任务包含 TTS 总条数、生成条数、跳过条数、错误数。
 - 配音任务包含 TTS 最大变速比、裁尾片段数量、质量风险片段 index。
 - strict sync 输出还必须包含分组数、`max_needed_atempo_ratio`、`max_atempo_ratio`、裁切片段数、`quality_warning` 计数、`display_text != tts_text` 计数。
+- 翻译上下文路径、timing-risk 路径、上下文 warnings、`normal/warning/critical` 风险计数和
+  最大预估所需语速比；这些字段也必须出现在最终 `status.json`。
 - 原声硬字幕任务不需要 TTS 统计，但必须包含 `width`、`height`、`subtitle_count`、`dialogue_count`、`visible_backslash_N`、`clone_voice: false`、`tts_engine: none`，并确认输出音视频时长与源视频一致。
 
 若 `tts_errors > 0`，任务不能标记成功。
