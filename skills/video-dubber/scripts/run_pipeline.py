@@ -153,6 +153,16 @@ def parse_args():
     parser.add_argument("--font-file")
     parser.add_argument("--min-free-gb", type=float, default=2.0)
     parser.add_argument("--max-atempo", type=float, default=1.6)
+    atempo_overflow_group = parser.add_mutually_exclusive_group()
+    atempo_overflow_group.add_argument(
+        "--allow-atempo-overflow", dest="allow_atempo_overflow", action="store_true",
+        help="Preserve full text by exceeding --max-atempo when required; report the speed tier.",
+    )
+    atempo_overflow_group.add_argument(
+        "--no-atempo-overflow", dest="allow_atempo_overflow", action="store_false",
+        help="Cap at --max-atempo and keep any overhang without cropping sentence endings.",
+    )
+    parser.set_defaults(allow_atempo_overflow=True)
     parser.add_argument("--max-clip-ms", type=int, default=80)
     parser.add_argument("--max-overhang-ms", type=int, default=450)
     parser.add_argument(

@@ -44,6 +44,7 @@ Supports **YouTube / Bilibili / Twitter/X / TikTok** and other online video plat
 | 🚀 **NVIDIA Riva first** | With `NVIDIA_API_KEY`, ASR prioritizes NVIDIA Riva gRPC, falling back to local Whisper. |
 | 🤖 **Qwen3-TTS by default** | MLX on Apple Silicon, one model load for all chunks, with model-specific resumable caches. |
 | 🧪 **Comparable model outputs** | Qwen3-TTS and F5 outputs use engine suffixes and alignment reports, so they do not overwrite each other. |
+| 🎬 **Content-first alignment** | Never auto-delete dialogue or crop sentence endings; safely merge same-speaker semantic windows, then locally accelerate and report timestamps/ratios when needed. |
 | 🔇 **Original/dubbing separation** | Can produce original-audio hard-subtitled output without running voice cloning. |
 | ✅ **Verifiable output** | Each run writes a verification report with duration, subtitle count, and dubbing status. |
 
@@ -257,3 +258,17 @@ VIDEO_DUBBER_TTS_BACKEND=qwen3 ./skills/video-dubber/scripts/setup_env.sh
 ```
 
 Use `--tts-engine qwen3-tts` (default), `--tts-engine f5-mlx` (F5), or `--tts-engine none` (subtitles only). Qwen3-TTS supports Chinese, Japanese, and Korean; Japanese synthesis uses the `japanese` language code. Example: `output_cloned_ja_target_qwen3tts.mp4`.
+
+### Timeline alignment and speed reporting
+
+The default policy preserves the complete translation. It does not summarize dialogue or crop sentence endings merely to fit the source subtitle window. The pipeline first merges fragmented windows only when they are known to belong to the same speaker and continuous semantic sentence. When merging is unsafe, local `atempo` keeps the original video timeline.
+
+`--max-atempo` is a preferred/reporting threshold, not a cropping threshold. `--allow-atempo-overflow` is enabled by default, so output still completes when the required ratio is higher. Verification reports include:
+
+- `natural`: up to 1.15x
+- `notice`: 1.15x–1.30x
+- `obvious`: 1.30x–1.50x
+- `extreme`: above 1.50x
+- abrupt ratio changes, segment timestamps, and suggested review points
+
+High ratios do not block final output, but they must be disclosed at delivery. No clipping proves content completeness, not natural pacing.

@@ -44,6 +44,7 @@
 | 🚀 **NVIDIA Riva 优先** | 配置 `NVIDIA_API_KEY` 后 ASR 优先走 NVIDIA Riva gRPC，不可用时回退本地 Whisper。 |
 | 🤖 **Qwen3-TTS 默认** | Apple Silicon 使用 MLX 版本，模型单次加载并复用 chunk；F5 保留为兼容后端。 |
 | 🧪 **多模型可比** | Qwen3-TTS、F5 等输出带引擎后缀和对齐报告，不会互相覆盖。 |
+| 🎬 **内容完整优先** | 超时不自动删台词、不裁句尾；安全合并同角色语义窗口，必要时局部加速并报告时间点与倍率。 |
 | 🔇 **原声/配音分离** | 可只做原声硬字幕，不需要配音时不跑声音克隆流程。 |
 | ✅ **输出可验证** | 每次生成后写验证报告，记录视频时长、字幕数、配音状态。 |
 
@@ -255,3 +256,17 @@ VIDEO_DUBBER_TTS_BACKEND=qwen3 ./skills/video-dubber/scripts/setup_env.sh
 ```
 
 可显式切换：`--tts-engine qwen3-tts`（默认）、`--tts-engine f5-mlx`（F5）、`--tts-engine none`（只烧字幕）。Qwen3-TTS 支持中文、日语和韩语；日语使用 `japanese` 语言代码。输出示例：`output_cloned_ja_target_qwen3tts.mp4`。
+
+### 时间线对齐与语速报告
+
+默认保留完整译文，不会为了塞入原字幕时间窗自动概括内容或裁掉句尾。流程会先尝试合并能确认属于同一说话人、同一连续语义的碎字幕；无法安全合并时，使用局部 `atempo` 保持原视频时间线。
+
+`--max-atempo` 是建议倍率和报告阈值，不是裁尾阈值。默认启用 `--allow-atempo-overflow`，实际所需倍率超过阈值时仍会完成输出，并在验证报告中列出：
+
+- `natural`：不超过 1.15x
+- `notice`：1.15x–1.30x
+- `obvious`：1.30x–1.50x
+- `extreme`：超过 1.50x
+- 相邻片段倍率突变、对应开始/结束时间和建议试听位置
+
+高倍率不会阻止最终文件生成，但交付时会明确提示。没有截断只代表内容完整，不代表语速自然。

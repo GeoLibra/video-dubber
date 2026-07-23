@@ -40,6 +40,7 @@ lang_code=chinese | japanese | korean | english
 - 参考音频内容 hash
 - 参考文本 hash
 - `max_atempo`、最大裁切和 overhang 参数
+- 是否允许超过建议倍率，以及语速等级阈值
 
 任务中断后，用同一个 job 目录和相同参数重跑。完整输出成功后，`--no-segments` 才清理本轮 chunk。
 
@@ -49,17 +50,18 @@ lang_code=chinese | japanese | korean | english
 
 - `raw_ms` / `target_ms`
 - `needed_atempo_ratio` / `atempo_ratio`
-- `cropped_ms` / `overhang_ms`
+- `cropped_ms`（新流程必须为 0）/ `overhang_ms`
 - `quality_warning`
+- `speed_tier` / `speed_notice`
 
-如果出现句尾裁切或 `quality_warning`：
+默认优先级是内容完整准确、不裁句尾、时间线同步、自然语速。不得为了对齐自动删减电影、访谈或教程内容。如果出现超窗或高倍率：
 
-1. 压短该段译文，同时更新屏幕字幕和 TTS 文本。
-2. 必要时合并相邻语义窗口。
+1. 只有确认同一说话人、同一连续语义且不覆盖关键音效时，才合并相邻窗口。
+2. 无法安全合并时，按实际所需倍率加速并保留完整句子。
 3. 只重生风险 chunk。
-4. 最后才温和提高局部 `atempo`。
+4. 在最终报告中列出超过 1.15x 的时间点、倍率和等级。
 
-不要把 2x 以上变速作为默认修复。它可以用于模型 A/B 试版避免漏字，但不能据此宣称自然的 strict sync 成片。
+`--max-atempo` 是建议和报告阈值，不是裁尾阈值。默认允许超过该阈值完成输出；2x 以上可以用于保证内容完整，但必须标记为 `extreme`，不能据此宣称语速自然。没有截断只代表句子完整，不代表配音质量自然。
 
 ## 多语言注意事项
 

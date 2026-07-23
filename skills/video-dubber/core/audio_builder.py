@@ -85,6 +85,17 @@ def _trim_silence(audio):
     return tail[:-end] if end else tail
 
 
+def classify_speed_ratio(ratio):
+    ratio = float(ratio or 1.0)
+    if ratio <= 1.15:
+        return "natural"
+    if ratio <= 1.30:
+        return "notice"
+    if ratio <= 1.50:
+        return "obvious"
+    return "extreme"
+
+
 def _fit_audio_to_duration(audio, target_ms, tmp_dir, args):
     from pydub import AudioSegment
 
@@ -101,8 +112,13 @@ def _fit_audio_to_duration(audio, target_ms, tmp_dir, args):
 
     if len(audio) > target_ms + 40:
         needed_ratio = len(audio) / target_ms
-        ratio = min(needed_ratio, args.max_atempo)
+        allow_overflow = getattr(args, "allow_atempo_overflow", True)
+        ratio = needed_ratio if allow_overflow else min(needed_ratio, args.max_atempo)
         stats["needed_atempo_ratio"] = round(needed_ratio, 4)
+        stats["preferred_max_atempo"] = args.max_atempo
+        stats["speed_tier"] = classify_speed_ratio(needed_ratio)
+        if needed_ratio > args.max_atempo:
+            stats["speed_notice"] = "preferred_atempo_threshold_exceeded"
         if 1.01 <= ratio:
             src = Path(tmp_dir) / f"fit_src_{time.time_ns()}.wav"
             dst = Path(tmp_dir) / f"fit_dst_{time.time_ns()}.wav"
@@ -121,18 +137,8 @@ def _fit_audio_to_duration(audio, target_ms, tmp_dir, args):
 
         if len(audio) > target_ms:
             overhang_ms = len(audio) - target_ms
-            if overhang_ms <= args.max_clip_ms:
-                stats["cropped_ms"] = overhang_ms
-                audio = audio[:target_ms]
-            elif overhang_ms > args.max_overhang_ms:
-                keep_ms = target_ms + args.max_overhang_ms
-                stats["overhang_ms"] = args.max_overhang_ms
-                stats["cropped_ms"] = len(audio) - keep_ms
-                stats["quality_warning"] = "tts_longer_than_window_kept_with_capped_overhang"
-                audio = audio[:keep_ms]
-            else:
-                stats["overhang_ms"] = overhang_ms
-                stats["quality_warning"] = "tts_longer_than_window_kept_to_avoid_cutting_sentence"
+            stats["overhang_ms"] = overhang_ms
+            stats["quality_warning"] = "tts_longer_than_window_kept_to_avoid_cutting_sentence"
 
     if len(audio) < target_ms:
         pad_ms = target_ms - len(audio)
@@ -182,6 +188,7 @@ def generate_and_merge(subs, out_dir, ref_audio_path, ref_text, video_duration_s
         "ref_audio_hash": hashlib.sha256(Path(ref_audio_path).read_bytes()).hexdigest(),
         "video_duration_ms": int(round(video_duration_s * 1000)),
         "max_atempo": args.max_atempo,
+        "allow_atempo_overflow": getattr(args, "allow_atempo_overflow", True),
         "max_clip_ms": args.max_clip_ms,
         "max_overhang_ms": args.max_overhang_ms,
     }

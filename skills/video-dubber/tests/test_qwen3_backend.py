@@ -74,6 +74,7 @@ class Qwen3BackendTest(unittest.TestCase):
             args = SimpleNamespace(
                 target_language="Japanese", tts_engine="qwen3-tts",
                 qwen3_model=td, hf_offline=False, max_atempo=1.6,
+                allow_atempo_overflow=True,
                 max_clip_ms=80, max_overhang_ms=450, no_segments=False,
             )
             merged, report = audio_builder.generate_and_merge(
@@ -84,6 +85,13 @@ class Qwen3BackendTest(unittest.TestCase):
             meta = json.loads((root / "tts_alignment_report_ja_qwen3tts.meta.json").read_text())
             self.assertEqual(meta["tts_engine"], "qwen3-tts")
             self.assertEqual(Path(meta["tts_model"]).resolve(), root.resolve())
+            self.assertTrue(meta["allow_atempo_overflow"])
+
+    def test_speed_tiers_make_fast_audio_visible(self):
+        self.assertEqual(audio_builder.classify_speed_ratio(1.0), "natural")
+        self.assertEqual(audio_builder.classify_speed_ratio(1.2), "notice")
+        self.assertEqual(audio_builder.classify_speed_ratio(1.4), "obvious")
+        self.assertEqual(audio_builder.classify_speed_ratio(1.8), "extreme")
 
 
 if __name__ == "__main__":
