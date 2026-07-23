@@ -1,0 +1,4 @@
+# Optional Qwen3-ASR route.
+# The official package recommends Python 3.12 in a fresh isolated environment.
+qwen-asr
+torch

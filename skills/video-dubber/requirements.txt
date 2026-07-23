@@ -9,6 +9,7 @@ python-dotenv
 pydub
 soundfile
 numpy
+mlx-whisper
 
 # Audio Separation
 audio-separator

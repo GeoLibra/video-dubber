@@ -40,7 +40,11 @@ download:
   cookies_from_browser: null
 
 asr:
+  engine: auto
+  mlx_whisper_model: mlx-community/whisper-large-v3-mlx
   whisper_model: null
+  qwen3_asr_model: null
+  qwen3_asr_aligner: null
   skip_separation: false
 
 tts:

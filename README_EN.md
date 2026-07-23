@@ -272,3 +272,5 @@ The default policy preserves the complete translation. It does not summarize dia
 - abrupt ratio changes, segment timestamps, and suggested review points
 
 High ratios do not block final output, but they must be disclosed at delivery. No clipping proves content completeness, not natural pacing.
+
+When per-segment TTS chunks already exist, `scripts/realign_existing_chunks.py` can rebuild continuous semantic windows without re-translating or loading the model. Use `--assume-single-speaker` only for confirmed single-presenter videos; it stays off for films and multi-speaker content to prevent cross-character merging.

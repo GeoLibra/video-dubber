@@ -1,2 +1,4 @@
 .env
-/Users/hgis/myproject/video-editing/video-dubber/skills/video-dubber/scripts/__pycache__
+/__pycache__
+docs
+skills/video-dubber/.agent

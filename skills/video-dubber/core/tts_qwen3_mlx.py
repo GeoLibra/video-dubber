@@ -16,6 +16,10 @@ LANG_CODES = {
 }
 
 
+def _skill_root() -> Path:
+    return Path(__file__).resolve().parent.parent
+
+
 def resolve_model_path(explicit: str | None = None, hf_offline: bool = False) -> str:
     configured = explicit or os.environ.get("QWEN3_TTS_MODEL")
     if configured:
@@ -29,7 +33,7 @@ def resolve_model_path(explicit: str | None = None, hf_offline: bool = False) ->
     home = Path.home()
     candidates = [
         home / "myproject/blender-video-skills/.worktrees/video-highlight/assets/video-highlight-norway-england/commentary_qwen3/models/qwen3/1.7b_bf16",
-        home / "myproject/video-dubber/.agent/models/Qwen3-TTS-12Hz-1.7B-Base-bf16",
+        _skill_root() / ".agent/models/Qwen3-TTS-12Hz-1.7B-Base-bf16",
         home / ".cache/qwen3-tts/1.7b_bf16",
     ]
     for path in candidates:

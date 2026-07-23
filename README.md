@@ -270,3 +270,5 @@ VIDEO_DUBBER_TTS_BACKEND=qwen3 ./skills/video-dubber/scripts/setup_env.sh
 - 相邻片段倍率突变、对应开始/结束时间和建议试听位置
 
 高倍率不会阻止最终文件生成，但交付时会明确提示。没有截断只代表内容完整，不代表语速自然。
+
+如果已有逐条生成的 TTS chunk，可使用 `scripts/realign_existing_chunks.py` 重新组合连续语义窗口，无需重新翻译或加载模型。`--assume-single-speaker` 只能用于明确的单人讲解视频；电影和多人内容默认关闭，避免跨角色合并。

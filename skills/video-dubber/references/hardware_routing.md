@@ -9,8 +9,11 @@
 
 ### 推荐降级仓库/依赖:
 *   **ASR (Whisper) [Fallback]**: 
-    *   **首选**: [ml-explore/mlx-examples (Whisper)](https://github.com/ml-explore/mlx-examples/tree/main/whisper)
-    *   **优势**: 苹果官方维护，原生 MLX 极速推理。
+    *   **首选**: `mlx-whisper` + `mlx-community/whisper-large-v3-mlx`。
+    *   **优势**: 原生 MLX/Metal 推理，适合 Apple Silicon；`large-v3` 精度通常明显高于 `faster-whisper base int8`，并且不用走 PyTorch/MPS 大内存路线。
+    *   **命令**: `--asr-engine mlx-whisper --mlx-whisper-model mlx-community/whisper-large-v3-mlx`。`auto` 模式在 Mac 上也会先走这条路线。
+    *   **兜底**: 只有 `mlx-whisper` 依赖、模型缓存或 Metal 环境不可用时，才回退 `whisper-cli` 显式模型或 `faster-whisper base`。
+    *   **运行约束**: `mlx` 需要可访问 Metal 设备；Codex/CI/headless 沙箱里可能报 `No Metal device available`。遇到该错误不要降级判断为模型坏了，改用允许访问 Metal 的外部执行方式跑 ASR。
 *   **TTS (Qwen3-TTS，默认)**:
     *   **首选**: `mlx-audio` + 本地 Qwen3-TTS 1.7B BF16 模型。
     *   **优势**: 中文和日语声音克隆效果已在完整视频上验证；模型可单次加载、循环生成并断点续跑。
@@ -56,4 +59,4 @@ def clear_vram():
         torch.mps.empty_cache()
 ```
 
-每次从 ASR 切换到 TTS，或从 TTS 切换到 MuseTalk 前，必须显式调用 `clear_vram()` 并确保上一个大模型已被 `del`。
+每次从 ASR 切换到 TTS，或从 TTS 切换到 MuseTalk 前，必须显式调用 `clear_vram()` 并确保上一个大模型已被 `del`。MLX 后端虽然不走 PyTorch CUDA/MPS cache，也要释放模型对象，避免统一内存长期占用。

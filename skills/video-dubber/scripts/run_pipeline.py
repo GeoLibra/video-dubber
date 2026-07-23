@@ -142,7 +142,27 @@ def parse_args():
     parser.add_argument("--ref-text")
     parser.add_argument("--ref-text-file")
     parser.add_argument("--auto-transcribe-ref", action="store_true")
+    parser.add_argument(
+        "--asr-engine",
+        choices=["auto", "mlx-whisper", "whisper", "faster-whisper", "qwen3-asr"],
+        default="auto",
+    )
+    parser.add_argument(
+        "--mlx-whisper-model",
+        default="mlx-community/whisper-large-v3-mlx",
+        help="MLX Whisper model repo/path used on Apple Silicon local ASR.",
+    )
     parser.add_argument("--whisper-model")
+    parser.add_argument(
+        "--qwen3-asr-model",
+        default=None,
+        help="Qwen3-ASR model id or local path, for example Qwen/Qwen3-ASR-1.7B.",
+    )
+    parser.add_argument(
+        "--qwen3-asr-aligner",
+        default=None,
+        help="Optional forced aligner model id/path for Qwen3-ASR timestamps.",
+    )
     parser.add_argument("--tts-engine", choices=["qwen3-tts", "f5-mlx", "none"], default="qwen3-tts")
     parser.add_argument("--qwen3-model", default=None,
                         help="Local Qwen3-TTS MLX model path or compatible model id.")

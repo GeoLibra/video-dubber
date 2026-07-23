@@ -99,7 +99,11 @@ def _apply_cli_overrides(cfg, args):
             "cookies_from_browser": getattr(args, "cookies_from_browser", None),
         },
         "asr": {
+            "engine": getattr(args, "asr_engine", None),
+            "mlx_whisper_model": getattr(args, "mlx_whisper_model", None),
             "whisper_model": getattr(args, "whisper_model", None),
+            "qwen3_asr_model": getattr(args, "qwen3_asr_model", None),
+            "qwen3_asr_aligner": getattr(args, "qwen3_asr_aligner", None),
             "skip_separation": getattr(args, "skip_separation", None),
         },
         "tts": {

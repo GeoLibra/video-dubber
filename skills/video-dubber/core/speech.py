@@ -1,10 +1,11 @@
 import os
+import platform
 import shutil
 from pathlib import Path
 
 import pysubs2
 
-from .media import FFMPEG, run
+from .media import FFMPEG, probe_duration, run
 from .source_loader import find_platform_subtitle
 
 
@@ -76,7 +77,76 @@ def _append_word_chunk(subs, words):
         subs.append(pysubs2.SSAEvent(start=st, end=et, text=text))
 
 
-def transcribe_audio_local(audio_path, out_dir, whisper_model=None):
+DEFAULT_MLX_WHISPER_MODEL = "mlx-community/whisper-large-v3-mlx"
+
+
+def _normalize_whisper_language(source_lang):
+    lang = (source_lang or "").strip()
+    if not lang or lang.lower() in {"auto", "multi"}:
+        return None
+    return lang.split("-", 1)[0].lower()
+
+
+def _append_segment(subs, start_s, end_s, text):
+    st = int(float(start_s) * 1000)
+    et = int(float(end_s) * 1000)
+    text = (text or "").strip()
+    if text and et > st:
+        subs.append(pysubs2.SSAEvent(start=st, end=et, text=text))
+
+
+def transcribe_audio_mlx_whisper(audio_path, out_dir, args):
+    srt_path = Path(out_dir) / "raw_audio.srt"
+    if srt_path.exists():
+        return pysubs2.load(str(srt_path), encoding="utf-8")
+
+    cache_home = Path(__file__).resolve().parents[1] / ".agent" / "hf-cache"
+    cache_home.mkdir(parents=True, exist_ok=True)
+    os.environ["HF_HOME"] = os.environ.get("MLX_WHISPER_HF_HOME", str(cache_home))
+    os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+
+    try:
+        import mlx_whisper
+    except Exception as exc:
+        raise RuntimeError("mlx-whisper is not installed in the active environment.") from exc
+
+    model = (
+        getattr(args, "mlx_whisper_model", None)
+        or os.environ.get("MLX_WHISPER_MODEL")
+        or DEFAULT_MLX_WHISPER_MODEL
+    )
+    print(f"[ASR] Using mlx-whisper model: {model}", flush=True)
+    result = mlx_whisper.transcribe(
+        str(audio_path),
+        path_or_hf_repo=model,
+        language=_normalize_whisper_language(getattr(args, "source_lang", None)),
+        word_timestamps=True,
+    )
+
+    subs = pysubs2.SSAFile()
+    for seg in result.get("segments", []) or []:
+        _append_segment(subs, seg.get("start", 0), seg.get("end", 0), seg.get("text", ""))
+
+    if len(subs) == 0:
+        text = (result.get("text") or "").strip()
+        if text:
+            from .media import probe_duration
+
+            subs.append(
+                pysubs2.SSAEvent(
+                    start=0,
+                    end=max(1000, int(probe_duration(audio_path) * 1000)),
+                    text=text,
+                )
+            )
+
+    if len(subs) == 0:
+        raise RuntimeError("mlx-whisper returned no transcription text.")
+    subs.save(str(srt_path))
+    return subs
+
+
+def transcribe_audio_whisper_cpp(audio_path, out_dir, whisper_model=None):
     srt_path = Path(out_dir) / "raw_audio.srt"
     if srt_path.exists():
         return pysubs2.load(str(srt_path), encoding="utf-8")
@@ -86,17 +156,140 @@ def transcribe_audio_local(audio_path, out_dir, whisper_model=None):
         output_base = str(Path(out_dir) / "raw_audio")
         run([whisper_cli, "-ng", "-m", whisper_model, "-f", audio_path, "-osrt", "-of", output_base], "ASR")
         return pysubs2.load(str(srt_path), encoding="utf-8")
+    raise RuntimeError("whisper.cpp needs whisper-cli and --whisper-model pointing to an existing ggml model.")
 
+
+def transcribe_audio_faster_whisper(audio_path, out_dir):
+    srt_path = Path(out_dir) / "raw_audio.srt"
+    if srt_path.exists():
+        return pysubs2.load(str(srt_path), encoding="utf-8")
     try:
         from faster_whisper import WhisperModel
     except Exception as exc:
-        raise RuntimeError("Local ASR fallback needs either whisper-cli + --whisper-model or faster-whisper installed.") from exc
+        raise RuntimeError("faster-whisper is not installed.") from exc
 
+    print("[ASR] Using final fallback: faster-whisper base int8", flush=True)
     model = WhisperModel("base", device="auto", compute_type="int8")
     segments, _info = model.transcribe(audio_path, word_timestamps=True)
     subs = pysubs2.SSAFile()
     for seg in segments:
         subs.append(pysubs2.SSAEvent(start=int(seg.start * 1000), end=int(seg.end * 1000), text=seg.text.strip()))
+    subs.save(str(srt_path))
+    return subs
+
+
+def transcribe_audio_local(audio_path, out_dir, args):
+    engine = getattr(args, "asr_engine", "auto")
+    if engine == "mlx-whisper":
+        return transcribe_audio_mlx_whisper(audio_path, out_dir, args)
+    if engine == "whisper":
+        return transcribe_audio_whisper_cpp(audio_path, out_dir, getattr(args, "whisper_model", None))
+    if engine == "faster-whisper":
+        return transcribe_audio_faster_whisper(audio_path, out_dir)
+
+    errors = []
+    if platform.system() == "Darwin":
+        try:
+            return transcribe_audio_mlx_whisper(audio_path, out_dir, args)
+        except Exception as exc:
+            errors.append(f"mlx-whisper: {exc}")
+
+    if getattr(args, "whisper_model", None):
+        try:
+            return transcribe_audio_whisper_cpp(audio_path, out_dir, args.whisper_model)
+        except Exception as exc:
+            errors.append(f"whisper.cpp: {exc}")
+
+    try:
+        return transcribe_audio_faster_whisper(audio_path, out_dir)
+    except Exception as exc:
+        errors.append(f"faster-whisper: {exc}")
+        raise RuntimeError("Local ASR fallback failed: " + "; ".join(errors)) from exc
+
+
+def _qwen3_language(source_lang):
+    aliases = {
+        "zh": "Chinese",
+        "cn": "Chinese",
+        "en": "English",
+        "ja": "Japanese",
+        "jp": "Japanese",
+        "ko": "Korean",
+        "kr": "Korean",
+        "yue": "Cantonese",
+        "multi": None,
+        "auto": None,
+    }
+    lang = (source_lang or "").strip()
+    if not lang:
+        return None
+    return aliases.get(lang.lower(), lang)
+
+
+def _append_qwen3_timestamp(subs, start_s, end_s, text):
+    st = int(float(start_s) * 1000)
+    et = int(float(end_s) * 1000)
+    text = (text or "").strip()
+    if text and et > st:
+        subs.append(pysubs2.SSAEvent(start=st, end=et, text=text))
+
+
+def transcribe_audio_qwen3(audio_path, out_dir, args):
+    srt_path = Path(out_dir) / "raw_audio.srt"
+    if srt_path.exists():
+        return pysubs2.load(str(srt_path), encoding="utf-8")
+
+    try:
+        import torch
+        from qwen_asr import Qwen3ASRModel
+    except Exception as exc:
+        raise RuntimeError(
+            "Qwen3-ASR needs qwen-asr and torch installed in the active environment."
+        ) from exc
+
+    model_name = args.qwen3_asr_model or "Qwen/Qwen3-ASR-1.7B"
+    aligner = args.qwen3_asr_aligner
+    kwargs = {
+        "dtype": torch.bfloat16,
+        "device_map": "auto",
+        "max_inference_batch_size": 8,
+        "max_new_tokens": 4096,
+    }
+    if aligner:
+        kwargs["forced_aligner"] = aligner
+        kwargs["forced_aligner_kwargs"] = {"dtype": torch.bfloat16, "device_map": "auto"}
+
+    print(f"[ASR] Using Qwen3-ASR: {model_name}", flush=True)
+    model = Qwen3ASRModel.from_pretrained(model_name, **kwargs)
+    results = model.transcribe(
+        audio=str(audio_path),
+        language=_qwen3_language(args.source_lang),
+        return_time_stamps=bool(aligner),
+    )
+    result = results[0] if isinstance(results, list) else results
+
+    subs = pysubs2.SSAFile()
+    time_stamps = getattr(result, "time_stamps", None) or getattr(result, "timestamps", None)
+    if time_stamps:
+        for item in time_stamps:
+            if isinstance(item, dict):
+                _append_qwen3_timestamp(
+                    subs,
+                    item.get("start", item.get("begin", 0)),
+                    item.get("end", item.get("finish", 0)),
+                    item.get("text", item.get("word", "")),
+                )
+            elif isinstance(item, (list, tuple)) and len(item) >= 3:
+                _append_qwen3_timestamp(subs, item[0], item[1], item[2])
+
+    if len(subs) == 0:
+        text = (getattr(result, "text", "") or "").strip()
+        if text:
+            duration_ms = max(1000, int(probe_duration(audio_path) * 1000))
+            subs.append(pysubs2.SSAEvent(start=0, end=duration_ms, text=text))
+
+    if len(subs) == 0:
+        raise RuntimeError("Qwen3-ASR returned no transcription text.")
     subs.save(str(srt_path))
     return subs
 
@@ -116,12 +309,25 @@ def transcribe_audio(audio_path, out_dir, args):
         subs.save(str(srt_path))
         return subs
 
+    if getattr(args, "asr_engine", "auto") == "qwen3-asr":
+        return transcribe_audio_qwen3(audio_path, out_dir, args)
+
+    if getattr(args, "asr_engine", "auto") == "whisper":
+        subs = transcribe_audio_local(audio_path, out_dir, args)
+        subs.save(str(srt_path))
+        return subs
+
+    if getattr(args, "asr_engine", "auto") in {"mlx-whisper", "faster-whisper"}:
+        subs = transcribe_audio_local(audio_path, out_dir, args)
+        subs.save(str(srt_path))
+        return subs
+
     try:
         print("[ASR] Trying NVIDIA Riva ASR", flush=True)
         subs = transcribe_audio_riva(audio_path, args.source_lang, config_type="word_time")
     except Exception as exc:
         print(f"[ASR] Riva unavailable; falling back locally: {exc}", flush=True)
-        subs = transcribe_audio_local(audio_path, out_dir, args.whisper_model)
+        subs = transcribe_audio_local(audio_path, out_dir, args)
 
     subs.save(str(srt_path))
     return subs
