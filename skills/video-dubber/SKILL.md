@@ -35,6 +35,8 @@ allowed-tools:
 15. **多模型产物必须隔离**：chunk、合并音频、对齐报告和克隆视频文件名都带引擎标识，避免 Qwen3-TTS、F5 或后续后端互相覆盖或误命中缓存。
 16. **禁止为对齐自动删减内容**：默认 `--translation-style faithful`，电影、访谈、教程等只允许等义翻译，不得为了塞入时间窗自动删除语气、否定、条件、数字、术语、伏笔或其他信息。只有用户明确指定 `--translation-style concise|summary` 时才允许压缩改写。
 17. **加速阈值是报告阈值，不是裁尾阈值**：超窗时可以超过建议倍率完成输出，但必须保留完整句子并在最终报告中列出时间点、倍率和风险等级；不能因为 `quality_warning` 或高倍率阻止用户要求的最终输出。
+18. **多人视频必须先分说话人**：访谈、播客、课程问答、电影片段或用户明确说“有不同人/声音不像原说话人”时，不要用单一参考音频套全片。优先启用 `--multi-speaker --speaker-count <N>`，用 WeSpeaker diarization 识别说话人、为每个说话人挑独立参考音频，并禁止跨说话人合并语义段。
+19. **多说话人产物必须隔离**：多说话人 TTS chunk、合并音频、对齐报告、验证报告和最终视频都必须带 `_multispeaker` 标识，避免误用单说话人缓存或覆盖旧结果。
 
 
 ## 长任务工程化工具
@@ -335,6 +337,13 @@ API key。
 
 参考文本必须尽量匹配参考音频，否则克隆音色会漂。
 
+多说话人参考音频：
+- 已知或疑似多人视频时，默认不要从全片抽一个“最佳参考”给所有字幕共用；先做 speaker diarization，再按每条字幕的主导重叠时间分配 speaker id。
+- Apple Silicon 本地优先使用官方 WeSpeaker helper；模型放在 `.agent/models/wespeaker`，运行环境放在 `.venv-speaker`。允许下载模型时可复用官方 WeSpeaker 模型，Mac 上优先 MPS，失败再回 CPU。
+- 已知人数时显式传 `--speaker-count`，例如双人访谈用 `--speaker-count 2`。不要依赖自动聚类猜人数来处理明确 2 人视频。
+- 每个 speaker 单独选择参考片段，评分优先级为：diarization purity 高、离本 speaker 聚类中心近、语音连续、无明显静音/噪声/音乐、避开说话人切换边界、参考文本能逐字对齐。低 purity、混说、转场、掌声/音乐附近的片段不得作为克隆参考。
+- 输出 `speaker_diarization.json` 必须包含 speaker 数量、每个字幕段的 speaker id、每位说话人的参考音频路径、参考文本、purity 和 segment counts。交付前至少确认每个有效 speaker 都有独立参考音频。
+
 ### 6. TTS 和时间轴对齐
 
 默认 strict sync 执行策略：
@@ -352,6 +361,7 @@ Qwen3-TTS 默认克隆策略（详细参数见 [qwen3_tts.md](references/qwen3_t
 - 使用 MLX 版本在 Apple Silicon 上推理，加载一次模型后循环生成全部语义段；不要为每段重启 CLI。
 - `Chinese/Japanese/Korean/English` 分别传 `chinese/japanese/korean/english`，不能把日语版本继续用 `chinese`。
 - 参考音频统一为 24kHz 单声道，参考文本必须逐字匹配；同一 A/B 对比复用同一参考音频和文本。
+- 多说话人模式下，每条语义段必须使用该段 speaker id 对应的参考音频和参考文本；chunk 缓存键必须包含 speaker id、参考音频和参考文本，不能让不同说话人共享同一个缓存命中。
 - chunk 缓存键必须包含目标文本、目标语言、引擎、模型、参考音频、参考文本和对齐参数。不同引擎不能共享 chunk。
 - 先做代表性短句和长句 smoke test。长句超窗时先安全合并语义窗口；局部 `atempo` 是时间线适配手段。超过 1.5x 仍可按用户要求输出，但必须在交付报告中明确列出，不能把高倍变速描述为自然语速。
 
@@ -416,8 +426,10 @@ python scripts/realign_existing_chunks.py \
 默认生成（克隆文件带引擎后缀，便于 A/B 对比）：
 - `output_original_<lang>_<mode>.mp4`：原音轨 + 指定字幕。
 - `output_cloned_<lang>_<mode>_<engine>.mp4`：克隆配音 + 可选 BGM + 指定字幕。
+- `output_cloned_<lang>_<mode>_<engine>_multispeaker.mp4`：多说话人克隆配音 + 可选 BGM + 指定字幕。
 
 例如 Qwen 中文单语输出为 `output_cloned_zh_target_qwen3tts.mp4`，日语单语输出为 `output_cloned_ja_target_qwen3tts.mp4`。
+双说话人 Qwen 中文单语输出为 `output_cloned_zh_target_qwen3tts_multispeaker.mp4`。
 
 原声硬字幕 / subtitle-only 模式：
 - 当用户明确不要克隆声音时，流程是 `下载/读取视频 -> 获取或 ASR 源字幕 -> checkpoint 翻译 -> 生成 ASS -> ffmpeg 保留原音轨烧录字幕 -> 验证`。
@@ -447,6 +459,7 @@ python .agents/skills/video-dubber/scripts/rebuild_outputs.py \
 - 字幕条数。
 - 配音任务包含 TTS 总条数、生成条数、跳过条数、错误数。
 - 配音任务包含 TTS 最大变速比、裁尾片段数量、质量风险片段 index。
+- 多说话人配音任务包含 `speaker_diarization.json` 路径、speaker 数量、每个 speaker 的参考音频 purity、参考文本、segment counts，以及最终每个 speaker 的 TTS chunk 数。
 - 配音任务包含 `natural/notice/obvious/extreme` 数量、所有非自然语速片段的 start/end、实际倍率，以及相邻片段语速突变列表。
 - strict sync 输出还必须包含分组数、`max_needed_atempo_ratio`、`max_atempo_ratio`、裁切片段数、`quality_warning` 计数、`display_text != tts_text` 计数。
 - 翻译上下文路径、timing-risk 路径、上下文 warnings、`normal/warning/critical` 风险计数和

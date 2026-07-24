@@ -38,7 +38,8 @@ def probe_streams(path):
             "-v",
             "error",
             "-show_entries",
-            "format=duration:stream=index,codec_type,duration",
+            "format=duration:stream=index,codec_type,duration:"
+            "stream_disposition=attached_pic",
             "-of",
             "json",
             path,

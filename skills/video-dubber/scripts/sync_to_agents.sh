@@ -17,6 +17,7 @@ rsync -a \
   --delete \
   --exclude ".git/" \
   --exclude ".venv/" \
+  --exclude ".venv-speaker/" \
   --exclude ".agent/" \
   --exclude "__pycache__/" \
   --exclude "*.pyc" \
@@ -25,4 +26,4 @@ rsync -a \
   "$TARGET_DIR"/
 
 echo "[SYNC] Skill source synced to $TARGET_DIR"
-echo "[SYNC] Runtime assets remain in $TARGET_DIR/.agent and environment remains in $TARGET_DIR/.venv"
+echo "[SYNC] Runtime assets remain in $TARGET_DIR/.agent and environments remain in $TARGET_DIR/.venv and $TARGET_DIR/.venv-speaker"

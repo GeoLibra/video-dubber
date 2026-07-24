@@ -17,8 +17,6 @@ def extract_reference_audio_from_subs(subs, vocals_path, out_dir):
 
     ref_audio_path = Path(out_dir) / "ref_audio.wav"
     ref_text_path = Path(out_dir) / "ref_text.txt"
-    if ref_audio_path.exists() and ref_text_path.exists():
-        return str(ref_audio_path), ref_text_path.read_text(encoding="utf-8").strip()
 
     candidates = []
     for sub in subs:
@@ -30,10 +28,20 @@ def extract_reference_audio_from_subs(subs, vocals_path, out_dir):
     if not candidates:
         raise ValueError("No usable subtitle segment for reference audio.")
     _score, ref_sub = sorted(candidates, key=lambda x: x[0])[0]
+    ref_text = _get_text(ref_sub)
+
+    # A resumed job may contain a reference pair created after translations were
+    # applied in-place. In that case ref_audio is source-language speech while
+    # ref_text is translated text, which makes zero-shot cloning unstable and
+    # often causes Qwen3-TTS to run until max_tokens. Reuse the cache only when
+    # its transcript still matches the selected source subtitle exactly.
+    if ref_audio_path.exists() and ref_text_path.exists():
+        cached_text = ref_text_path.read_text(encoding="utf-8").strip()
+        if normalize_spaces(cached_text) == normalize_spaces(ref_text):
+            return str(ref_audio_path), cached_text
 
     start_sec = ref_sub.start / 1000.0
     duration_sec = min((ref_sub.end - ref_sub.start) / 1000.0, 12.0)
-    ref_text = _get_text(ref_sub)
     run([
         FFMPEG, "-hide_banner", "-loglevel", "error", "-y",
         "-i", vocals_path,
@@ -195,11 +203,21 @@ def _export_atomic(audio, path):
     os.replace(tmp, path)
 
 
-def generate_and_merge(subs, out_dir, ref_audio_path, ref_text, video_duration_s, args):
+def generate_and_merge(
+    subs,
+    out_dir,
+    ref_audio_path,
+    ref_text,
+    video_duration_s,
+    args,
+    speaker_refs=None,
+):
     from pydub import AudioSegment
 
     slug = lang_slug(args.target_language)
     engine_slug = args.tts_engine.replace("-", "")
+    if getattr(args, "multi_speaker", False):
+        engine_slug += "_multispeaker"
     resolved_model = None
     if args.tts_engine == "qwen3-tts":
         from .tts_qwen3_mlx import resolve_model_path
@@ -220,15 +238,35 @@ def generate_and_merge(subs, out_dir, ref_audio_path, ref_text, video_duration_s
         return str(merged_wav), report
 
     tts_hash = hashlib.sha256(
-        "\n".join(normalize_spaces(getattr(sub, "tts_text", sub.text)) for sub in subs).encode("utf-8")
+        "\n".join(
+            f"{getattr(sub, 'speaker_id', 'speaker_00')}|"
+            f"{normalize_spaces(getattr(sub, 'tts_text', sub.text))}"
+            for sub in subs
+        ).encode("utf-8")
     ).hexdigest()
+    speaker_ref_identity = None
+    if speaker_refs:
+        speaker_ref_identity = {
+            speaker_id: {
+                "audio_hash": hashlib.sha256(Path(item["audio"]).read_bytes()).hexdigest(),
+                "text_hash": hashlib.sha256(item["text"].encode("utf-8")).hexdigest(),
+                "source_index": item.get("source_index"),
+            }
+            for speaker_id, item in sorted(speaker_refs.items())
+        }
     expected_meta = {
         "tts_hash": tts_hash,
         "target_language": args.target_language,
         "tts_engine": args.tts_engine,
         "tts_model": _tts_model_identity(args.tts_engine, resolved_model),
-        "ref_text_hash": hashlib.sha256(ref_text.encode("utf-8")).hexdigest(),
-        "ref_audio_hash": hashlib.sha256(Path(ref_audio_path).read_bytes()).hexdigest(),
+        "ref_text_hash": (
+            hashlib.sha256(ref_text.encode("utf-8")).hexdigest() if ref_text else None
+        ),
+        "ref_audio_hash": (
+            hashlib.sha256(Path(ref_audio_path).read_bytes()).hexdigest()
+            if ref_audio_path else None
+        ),
+        "speaker_refs": speaker_ref_identity,
         "video_duration_ms": int(round(video_duration_s * 1000)),
         "max_atempo": args.max_atempo,
         "allow_atempo_overflow": getattr(args, "allow_atempo_overflow", True),
@@ -273,6 +311,8 @@ def generate_and_merge(subs, out_dir, ref_audio_path, ref_text, video_duration_s
             "index": idx, "start_ms": sub.start, "end_ms": sub.end,
             "target_ms": target_ms, "text": tts_text,
         }
+        speaker_id = getattr(sub, "speaker_id", "speaker_00")
+        item["speaker_id"] = speaker_id
         if target_ms <= 0 or is_non_speech(tts_text):
             item["skipped"] = True
             report = [x for x in report if not (isinstance(x, dict) and x.get("index") == idx)]
@@ -287,8 +327,16 @@ def generate_and_merge(subs, out_dir, ref_audio_path, ref_text, video_duration_s
                 tmp_chunk = chunk_wav.with_name(chunk_wav.name + ".tmp")
                 tmp_chunk.unlink(missing_ok=True)
                 with _ChunkTimeout(getattr(args, "qwen3_tts_chunk_timeout_sec", 180)):
+                    selected_ref_audio = ref_audio_path
+                    selected_ref_text = ref_text
+                    if speaker_refs:
+                        selected_ref = speaker_refs.get(speaker_id)
+                        if selected_ref is None:
+                            raise KeyError(f"No reference configured for {speaker_id}")
+                        selected_ref_audio = selected_ref["audio"]
+                        selected_ref_text = selected_ref["text"]
                     engine.synthesize(
-                        tts_text, ref_audio_path, ref_text, str(tmp_chunk),
+                        tts_text, selected_ref_audio, selected_ref_text, str(tmp_chunk),
                         hf_offline=args.hf_offline,
                         target_language=args.target_language,
                         model_path=resolved_model,
@@ -341,6 +389,8 @@ def add_gap_audio(tts_audio, raw_audio, subs, out_dir, video_duration_s, args):
     from pydub import AudioSegment
 
     engine_slug = args.tts_engine.replace("-", "")
+    if getattr(args, "multi_speaker", False):
+        engine_slug += "_multispeaker"
     suffix = f"{lang_slug(args.target_language)}_{args.subtitle_mode}_{engine_slug}"
     out_path = Path(out_dir) / f"merged_tts_{suffix}.with_gap_original.wav"
     inputs = [Path(tts_audio), Path(raw_audio)]

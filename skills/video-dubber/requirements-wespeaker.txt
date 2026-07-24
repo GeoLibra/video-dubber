@@ -1,0 +1,8 @@
+# Isolated speaker-diarization environment.
+# Kept separate because the official WeSpeaker stack currently requires
+# torch/torchaudio 2.7.x, while the main Qwen3-TTS environment uses MLX.
+torch==2.7.1
+torchaudio==2.7.1
+onnxruntime==1.23.2
+soundfile==0.14.0
+git+https://github.com/wenet-e2e/wespeaker.git@dfa741957e5c11f477623b6e583d67d0af25ee88

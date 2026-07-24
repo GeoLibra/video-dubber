@@ -32,6 +32,7 @@ from core.lang import normalize_name, slug as lang_slug
 from core.subtitle import get_sub_source_text
 from core.translate import translate_subtitles
 from core.audio_builder import prepare_reference_audio, generate_and_merge, add_gap_audio
+from core.speaker_diarization import prepare_speaker_references
 from core.video_builder import synthesize_videos, synthesize_original_video
 from core.verifier import verify_outputs
 from core.costs import TaskMeter
@@ -213,11 +214,28 @@ def parse_args():
                         help="Qwen3-TTS sampling temperature.")
     parser.add_argument("--qwen3-tts-chunk-timeout-sec", type=int, default=180,
                         help="Per-chunk watchdog timeout for Qwen3-TTS; 0 disables.")
+    parser.add_argument("--multi-speaker", action="store_true",
+                        help="Diarize subtitle windows and clone each detected speaker separately.")
+    parser.add_argument("--speaker-count", type=int, default=0,
+                        help="Expected speaker count; 0 estimates automatically.")
+    parser.add_argument("--max-speakers", type=int, default=4,
+                        help="Maximum speakers (reserved for automatic diarization backends).")
+    parser.add_argument("--wespeaker-model", default="english",
+                        help="WeSpeaker model alias/path used for multi-speaker diarization.")
     parser.add_argument("--skip-separation", action="store_true")
     parser.add_argument("--no-segments", action="store_true")
     parser.add_argument("--hf-offline", action="store_true")
     parser.add_argument("--tmp-dir")
     parser.add_argument("--font-file")
+    cover_group = parser.add_mutually_exclusive_group()
+    cover_group.add_argument("--embed-cover", dest="embed_cover", action="store_true",
+                             help="Generate a JPEG thumbnail and embed it as MP4 attached_pic.")
+    cover_group.add_argument("--no-embed-cover", dest="embed_cover", action="store_false")
+    parser.set_defaults(embed_cover=True)
+    parser.add_argument("--cover-image",
+                        help="Optional custom image; converted to JPEG before embedding.")
+    parser.add_argument("--cover-time-sec", type=float, default=2.0,
+                        help="Frame time used for the automatic cover image.")
     parser.add_argument("--min-free-gb", type=float, default=2.0)
     parser.add_argument("--max-atempo", type=float, default=1.6)
     atempo_overflow_group = parser.add_mutually_exclusive_group()
@@ -273,6 +291,14 @@ def parse_args():
         parser.error("--qwen3-tts-max-tokens must be > 0.")
     if args.qwen3_tts_chunk_timeout_sec < 0:
         parser.error("--qwen3-tts-chunk-timeout-sec must be >= 0.")
+    if args.cover_time_sec < 0:
+        parser.error("--cover-time-sec must be >= 0.")
+    if args.cover_image and not Path(args.cover_image).expanduser().is_file():
+        parser.error("--cover-image must exist and be a file.")
+    if args.speaker_count < 0 or args.max_speakers < 1:
+        parser.error("--speaker-count must be >= 0 and --max-speakers must be >= 1.")
+    if args.speaker_count > args.max_speakers:
+        parser.error("--speaker-count cannot exceed --max-speakers.")
     if args.context_char_budget <= 0:
         parser.error("--context-char-budget must be > 0.")
     if args.context_neighbor_lines < 0:
@@ -364,6 +390,41 @@ def main():
             )
             sys.exit(0)
 
+        # Build the cloning reference while `subs` still contains the original
+        # source-language text. translate_subtitles() applies translations
+        # in-place, so preparing the reference afterwards can pair English
+        # audio with Chinese ref_text and make Qwen3-TTS fail to stop normally.
+        ref_audio_path = None
+        ref_text = None
+        speaker_refs = None
+        speaker_report_path = None
+        if args.tts_engine != "none":
+            meter.phase_start("reference")
+            update_status(args.status, "running", "preparing reference audio", stage="reference")
+            if args.multi_speaker:
+                speaker_refs, speaker_report_path = prepare_speaker_references(
+                    subs,
+                    vocals_path,
+                    job_dir,
+                    speaker_count=args.speaker_count,
+                    max_speakers=args.max_speakers,
+                    model=args.wespeaker_model,
+                )
+                log(
+                    "Speaker references: "
+                    + ", ".join(
+                        f"{speaker}={item['source_index']}"
+                        for speaker, item in speaker_refs.items()
+                    ),
+                    "SPEAKER",
+                )
+            else:
+                ref_audio_path, ref_text = prepare_reference_audio(
+                    subs, vocals_path, job_dir, args
+                )
+                log(f"Reference text: {ref_text}", "REF_TEXT")
+            meter.phase_end()
+
         meter.phase_start("translation")
         update_status(args.status, "running", "translating", stage="translation", stage_timeout_min=15)
         ass_path, subs_translated, _translations, translation_context_info = translate_subtitles(
@@ -418,16 +479,16 @@ def main():
             tts_audio, tts_report = None, []
             log("Subtitle-only mode: skip reference audio and voice cloning.", "TTS")
         else:
-            meter.phase_start("reference")
-            update_status(args.status, "running", "preparing reference audio", stage="reference")
-            ref_audio_path, ref_text = prepare_reference_audio(subs, vocals_path, job_dir, args)
-            log(f"Reference text: {ref_text}", "REF_TEXT")
-            meter.phase_end()
-
             meter.phase_start("tts")
             update_status(args.status, "running", "generating aligned tts", stage="tts")
             tts_audio, tts_report = generate_and_merge(
-                subs_translated, job_dir, ref_audio_path, ref_text, video_duration_s, args
+                subs_translated,
+                job_dir,
+                ref_audio_path,
+                ref_text,
+                video_duration_s,
+                args,
+                speaker_refs=speaker_refs,
             )
             tts_chars = sum(len(item.get("text", "")) for item in tts_report)
             meter.log_tts(tts_chars)
@@ -453,6 +514,7 @@ def main():
             job_dir,
             args,
             translation_context_info,
+            speaker_report_path=speaker_report_path,
         )
         meter.phase_end()
 

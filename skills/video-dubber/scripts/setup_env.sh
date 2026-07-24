@@ -12,6 +12,34 @@ if ! command -v uv &> /dev/null; then
 fi
 
 TTS_BACKEND="${VIDEO_DUBBER_TTS_BACKEND:-qwen3}"
+SPEAKER_BACKEND="${VIDEO_DUBBER_SPEAKER_BACKEND:-wespeaker}"
+
+setup_speaker_environment() {
+    if [ "$SPEAKER_BACKEND" = "none" ]; then
+        echo "[SETUP] Skipping speaker diarization backend install."
+        return
+    fi
+    if [ "$SPEAKER_BACKEND" != "wespeaker" ]; then
+        echo "Unknown VIDEO_DUBBER_SPEAKER_BACKEND=$SPEAKER_BACKEND. Use wespeaker or none." >&2
+        exit 1
+    fi
+
+    local speaker_hash
+    speaker_hash=$(md5 requirements-wespeaker.txt 2>/dev/null | awk '{print $NF}' || md5sum requirements-wespeaker.txt | cut -d' ' -f1)
+    if [ -f .venv-speaker/.env_hash ] \
+       && [ "$(cat .venv-speaker/.env_hash)" = "$speaker_hash" ] \
+       && [ -x .venv-speaker/bin/python ]; then
+        echo "[SETUP] .venv-speaker is up to date."
+        return
+    fi
+
+    echo "[SETUP] Creating isolated WeSpeaker environment..."
+    uv venv .venv-speaker --python 3.10 --seed
+    uv pip install --python .venv-speaker/bin/python -r requirements-wespeaker.txt
+    echo "$speaker_hash" > .venv-speaker/.env_hash
+}
+
+setup_speaker_environment
 
 # compute hash of all requirements files + backend choice as cache key
 HASH_SOURCE=$(cat requirements.txt requirements-qwen3-tts.txt requirements-f5-mlx.txt requirements-f5-pytorch.txt 2>/dev/null)

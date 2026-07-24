@@ -1,9 +1,33 @@
 import json
+import math
+from collections import Counter
 from pathlib import Path
 
 from .lang import slug as lang_slug
 from .media import probe_streams
 from .job_runtime import atomic_write_json
+
+
+def detect_generation_plateau(tts_report):
+    """Detect repeated max-token-like outputs that were force-fit to the timeline."""
+    suspicious = [
+        int(item["raw_ms"])
+        for item in tts_report
+        if item.get("raw_ms", 0) >= 12000
+        and item.get("speed_tier") == "extreme"
+    ]
+    if not suspicious:
+        return None
+    raw_ms, count = Counter(suspicious).most_common(1)[0]
+    threshold = max(3, math.ceil(len(tts_report) * 0.10))
+    if count < threshold:
+        return None
+    return {
+        "raw_ms": raw_ms,
+        "count": count,
+        "threshold": threshold,
+        "reason": "repeated_long_extreme_chunks_likely_hit_generation_token_limit",
+    }
 
 
 def verify_outputs(
@@ -14,11 +38,13 @@ def verify_outputs(
     out_dir,
     args,
     translation_context_info=None,
+    speaker_report_path=None,
 ):
     is_subtitle_only = args.tts_engine == "none"
     atempo_ratios = [x.get("atempo_ratio", 1.0) for x in tts_report if "atempo_ratio" in x]
     clipped = [x for x in tts_report if x.get("cropped_ms", 0) > 0]
     warned = [x for x in tts_report if x.get("quality_warning")]
+    generation_plateau = detect_generation_plateau(tts_report)
     speed_tiers = {"natural": 0, "notice": 0, "obvious": 0, "extreme": 0}
     speed_notices = []
     abrupt_speed_changes = []
@@ -52,6 +78,10 @@ def verify_outputs(
         "subtitle_count": len(subs),
         "clone_voice": not is_subtitle_only,
         "tts_engine": args.tts_engine,
+        "embedded_cover": any(
+            stream.get("disposition", {}).get("attached_pic") == 1
+            for stream in probe_streams(cloned_path).get("streams", [])
+        ),
     }
     if not is_subtitle_only:
         report.update({
@@ -71,6 +101,18 @@ def verify_outputs(
             "tts_content_policy": "preserve_full_text_never_crop_sentence_end",
             "completed_with_speed_risks": bool(speed_notices),
             "content_preserved": True,
+            "tts_generation_plateau": generation_plateau,
+            "speaker_count": len(
+                {item.get("speaker_id") for item in tts_report if item.get("speaker_id")}
+            ),
+            "speaker_segment_counts": dict(
+                Counter(
+                    item.get("speaker_id")
+                    for item in tts_report
+                    if item.get("speaker_id")
+                )
+            ),
+            "speaker_diarization_report": speaker_report_path,
         })
 
     if translation_context_info:
@@ -94,10 +136,18 @@ def verify_outputs(
         )
 
     engine_suffix = "" if is_subtitle_only else f"_{args.tts_engine.replace('-', '')}"
+    if not is_subtitle_only and getattr(args, "multi_speaker", False):
+        engine_suffix += "_multispeaker"
     report_path = Path(out_dir) / (
         f"verification_report_{lang_slug(args.target_language)}_{args.subtitle_mode}{engine_suffix}.json"
     )
     atomic_write_json(report_path, report)
     if not is_subtitle_only and report.get("tts_errors"):
         raise RuntimeError(f"TTS errors found: {report['tts_errors']}. See {report_path}")
+    if not is_subtitle_only and generation_plateau:
+        raise RuntimeError(
+            "TTS generation plateau detected "
+            f"({generation_plateau['count']} chunks at {generation_plateau['raw_ms']} ms). "
+            f"Likely reference-text mismatch or max-token exhaustion. See {report_path}"
+        )
     return str(report_path), report
