@@ -39,10 +39,10 @@ Supports **YouTube / Bilibili / Twitter/X / TikTok** and other online video plat
 | --- | --- |
 | 🔁 **Resumable jobs** | Interrupted? Continue from the same directory; completed steps auto-skip. |
 | 💰 **Token saving** | Translation sends only subtitle IDs + text, not the full timeline repeatedly; cached content is not re-translated. |
-| ❤️ **Heartbeat monitoring** | Long-running tasks log stage progress so you can find and handle stuck stages. |
+| ❤️ **Heartbeat monitoring** | Background jobs track PID, status heartbeat, and artifact growth so you can detect stale work and resume from the same job directory. |
 | 🏷️ **Platform subtitles first** | Use platform subtitles when available to reduce ASR time and errors. |
-| 🚀 **NVIDIA Riva first** | With `NVIDIA_API_KEY`, ASR prioritizes NVIDIA Riva gRPC, falling back to local Whisper. |
-| 🤖 **Qwen3-TTS by default** | MLX on Apple Silicon, one model load for all chunks, with model-specific resumable caches. |
+| 🚀 **Layered ASR routing** | With `NVIDIA_API_KEY`, ASR prefers NVIDIA Riva; on Mac, local Qwen3-ASR MLX with optional ForcedAligner comes next, then mlx-whisper / Whisper. |
+| 🤖 **Qwen3-TTS by default** | Apple Silicon uses the MLX version; the model loads once and is reused across chunks, while F5 remains available as a compatibility backend. |
 | 🧪 **Comparable model outputs** | Qwen3-TTS and F5 outputs use engine suffixes and alignment reports, so they do not overwrite each other. |
 | 🎬 **Content-first alignment** | Never auto-delete dialogue or crop sentence endings; safely merge same-speaker semantic windows, then locally accelerate and report timestamps/ratios when needed. |
 | 🔇 **Original/dubbing separation** | Can produce original-audio hard-subtitled output without running voice cloning. |
@@ -181,7 +181,7 @@ models:
 
 ### NVIDIA Riva ASR (Optional)
 
-Besides translation, `NVIDIA_API_KEY` can also be used for **NVIDIA Riva** speech-to-text (ASR). When configured, ASR prioritizes Riva gRPC, falling back to local Whisper if unavailable.
+Besides translation, `NVIDIA_API_KEY` can also be used for **NVIDIA Riva** speech-to-text (ASR). When configured, ASR first tries Riva gRPC; if the cloud service is unavailable or no key is provided, Mac Apple Silicon defaults to local Qwen3-ASR MLX, can optionally refine timestamps with Qwen3-ForcedAligner MLX, and only then falls back to mlx-whisper / Whisper.
 
 #### Request an NVIDIA API Key
 
@@ -199,6 +199,22 @@ The same key can be used for NVIDIA Riva ASR and NVIDIA-hosted translation model
 
 > ⚠️ `NVIDIA_API_KEY` can be used for both Riva ASR and NVIDIA translation models, but translation only uses NVIDIA when explicitly enabled in `model-config.yaml`.
 
+### ASR Routing Notes
+
+Recommended priority:
+
+1. With `NVIDIA_API_KEY`: NVIDIA Riva cloud ASR. Key signup: [https://build.nvidia.com/models](https://build.nvidia.com/models)
+2. Mac Apple Silicon, best local quality: `--asr-engine qwen3-asr-mlx --qwen3-asr-mlx-model mlx-community/Qwen3-ASR-1.7B-8bit`
+3. Mac lower-memory / faster option: `mlx-community/Qwen3-ASR-0.6B-8bit`
+4. Timestamp refinement: `--qwen3-aligner-mode sentence --qwen3-aligner-mlx-model mlx-community/Qwen3-ForcedAligner-0.6B-8bit`
+5. Stable fallback: `mlx-whisper + mlx-community/whisper-large-v3-mlx`, and only then whisper.cpp / faster-whisper
+
+ForcedAligner is used to re-align existing text back onto audio for finer word-level timestamps. In the default `sentence` mode, it only recalculates sentence boundaries, so the final subtitles still stay natural sentence-level rather than one word per line.
+
+### Translation Style
+
+The default is `--translation-style faithful`: meaning-preserving translation without deleting content to fit a time window. Compression or summarization is allowed only when you explicitly choose `--translation-style concise` or `--translation-style summary`.
+
 ### Other Configuration
 
 | Need | How to configure |
@@ -206,6 +222,20 @@ The same key can be used for NVIDIA Riva ASR and NVIDIA-hosted translation model
 | 🔑 Platform login (Bilibili / Twitter / Instagram etc.) | Tell the Agent to use browser cookies |
 | 🌐 Translation target language | Tell the Agent "translate to Japanese/Korean/Chinese" |
 | 📝 Bilingual subtitles | Tell the Agent "use Chinese-English bilingual subtitles" |
+
+---
+
+## Long Jobs and Heartbeat Monitoring
+
+For long jobs, prefer the built-in detached runner. The current heartbeat design is not an auto-restarting daemon; it is a three-signal status check:
+
+| Signal | File / tool | Purpose |
+| --- | --- | --- |
+| PID | `job_pid.txt` / `status_job.py` | Check whether the background process is still alive |
+| Heartbeat | `pipeline_status.json` modification time | Detect whether the pipeline has stopped making stage progress |
+| Artifact growth | `chunk_*_qwen3tts_*.wav`, `output_*.mp4`, `merged_tts_*.wav` | Check whether output files are still being produced |
+
+If `status_job.py` reports `heartbeat_stale=true`, and the PID is gone or artifacts are no longer growing, resume with `resume_job.py --detached` in the same job directory. Do not delete chunks and do not switch to a new directory.
 
 ---
 
