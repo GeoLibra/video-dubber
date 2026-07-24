@@ -36,6 +36,7 @@ from core.video_builder import synthesize_videos, synthesize_original_video
 from core.verifier import verify_outputs
 from core.costs import TaskMeter
 from core.job_runtime import merge_status, atomic_write_json
+from core.job_state import append_event, ensure_job_layout, update_progress
 
 
 FFMPEG = shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg"
@@ -47,7 +48,26 @@ def log(msg, step=None):
 
 
 def update_status(status_file, status, msg="", **extra):
-    return merge_status(status_file, status, msg, pid=os.getpid(), **extra)
+    current = merge_status(status_file, status, msg, pid=os.getpid(), **extra)
+    job_dir = Path(status_file).resolve().parent
+    update_progress(
+        job_dir,
+        status=status,
+        stage=extra.get("stage", current.get("stage")),
+        message=msg,
+        pid=os.getpid(),
+        pipeline_status=str(Path(status_file).resolve()),
+    )
+    append_event(
+        job_dir,
+        "worker",
+        "info",
+        "status_update",
+        msg,
+        status=status,
+        stage=extra.get("stage", current.get("stage")),
+    )
+    return current
 
 
 def preflight(job_dir, args):
@@ -279,6 +299,7 @@ def main():
 
     job_dir = Path(args.status).resolve().parent
     job_dir.mkdir(parents=True, exist_ok=True)
+    ensure_job_layout(job_dir)
 
     tmp_dir = setup_runtime(job_dir, tmp_dir=args.tmp_dir)
 

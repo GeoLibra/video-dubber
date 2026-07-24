@@ -3,6 +3,12 @@ from __future__ import annotations
 import argparse, json, subprocess, sys
 from pathlib import Path
 
+SKILL_DIR = Path(__file__).resolve().parents[1]
+if str(SKILL_DIR) not in sys.path:
+    sys.path.insert(0, str(SKILL_DIR))
+
+from core.job_state import append_event, ensure_job_layout, read_progress, update_progress
+
 BOOL_FLAGS = {
     "confirm_translation", "allow_source_fallback", "auto_transcribe_ref", "skip_separation",
     "no_segments", "hf_offline", "allow_playlist", "list_formats", "preserve_gap_audio",
@@ -18,6 +24,15 @@ def main():
     parser.add_argument("--detached", action="store_true")
     args = parser.parse_args()
     job = Path(args.job_dir).expanduser().resolve()
+    ensure_job_layout(job)
+    progress = read_progress(job)
+    update_progress(
+        job,
+        status="resuming",
+        resume_count=int(progress.get("resume_count", 0)) + 1,
+        guardian_status="resuming",
+    )
+    append_event(job, "guardian" if args.detached else "worker", "decision", "resume_job", "Resume from existing job_config.json.", detached=args.detached)
     config = json.loads((job / "job_config.json").read_text(encoding="utf-8"))
     config.setdefault("status", str(job / "pipeline_status.json"))
     config.setdefault("log", str(job / "pipeline.log"))

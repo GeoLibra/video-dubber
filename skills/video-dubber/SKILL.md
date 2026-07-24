@@ -509,9 +509,30 @@ uv pip install -r requirements-f5-pytorch.txt  # PyTorch 后端
 
 ### 心跳监控（Heartbeat / Status Check）
 
-当前实现是“可恢复的状态监控”，不是常驻自动重启 daemon。长任务建议用
-`scripts/start_detached_job.py` 启动；它会写 `job_pid.txt`，主流程会持续写
-`pipeline_status.json`，TTS 每个 chunk 完成后也会落盘产物。
+当前实现是“可恢复的状态监控 + 单 job guardian”，不是系统级 L0/L1 三层守护。
+长任务建议用 `scripts/start_detached_job.py` 启动；它会写 `job_pid.txt`，
+主流程会持续写 `pipeline_status.json`，TTS 每个 chunk 完成后也会落盘产物。
+
+每个 job 必须维护标准状态和日志：
+
+```text
+state/task_spec.md
+state/progress.json
+state/directions_tried.json
+state/iteration_log.jsonl
+logs/work.jsonl
+logs/heartbeat.jsonl
+```
+
+JSONL 日志格式：
+
+```json
+{"ts":"...","source":"worker|guardian","level":"info|warn|error|decision","event":"...","detail":"..."}
+```
+
+Worker 只写自己的状态、日志和产物。Guardian 只允许执行三类动作：
+`liveness-check`、`resume`、`mark-structurally-stuck`；不得读取或修改字幕、翻译、
+TTS chunk 等业务数据。
 
 健康检查看三层：
 
@@ -522,12 +543,18 @@ uv pip install -r requirements-f5-pytorch.txt  # PyTorch 后端
 | **产物增长** | `chunk_*_qwen3tts_*.wav` / `output_*.mp4` / `merged_tts_*.wav` mtime 与数量 | `status_job.py` | 判断即使 status 没更新，实际文件是否仍在增长 |
 
 `status_job.py` 会输出 `pid_alive`、`last_seen_age_sec`、`heartbeat_stale`、
-`chunk_count`、`last_artifact_age_sec` 和已有输出文件。若 `heartbeat_stale=true`
-且 PID 不存在或产物不增长，使用同一 job 目录执行 `scripts/resume_job.py --detached`
-恢复；不要换 job 目录，不要删除 chunk。
+`artifacts_recent`、`stalled`、`structurally_stuck`、`chunk_count`、
+`last_artifact_age_sec` 和已有输出文件。只有当心跳 stale、PID 不存在且近期没有产物增长时，
+才判定 `stalled=true`。恢复使用同一 job 目录执行
+`scripts/resume_job.py --detached`；不要换 job 目录，不要删除 chunk。
+
+`scripts/watch_job.py --job-dir <job_dir>` 是单 job guardian，会定时查活并自动恢复。
+连续 stale 超过阈值后，写 `state/progress.json` 的
+`guardian_status=structurally_stuck` 并停止自动恢复，避免无限重启。
 
 默认不按分钟向用户自然语言汇报，只在阶段完成、状态异常、需要恢复、或产物完成时汇报。
-后续若要升级成真正 L1/L0 自动守护，应另加明确的 watcher/launchctl 脚本，不能在文档里假定已经存在。
+后续若要升级成真正 L1/L0 系统级守护，应另加明确的 cron/launchctl/shell guard，
+不能在文档里假定已经存在。
 
 意外中断后可以继续：不要换 job 目录，不要删除阶段产物，使用同一条命令重跑。脚本会复用：
 - `raw_video.mp4` / `raw_audio.wav`

@@ -227,7 +227,23 @@ The default is `--translation-style faithful`: meaning-preserving translation wi
 
 ## Long Jobs and Heartbeat Monitoring
 
-For long jobs, prefer the built-in detached runner. The current heartbeat design is not an auto-restarting daemon; it is a three-signal status check:
+For long jobs, prefer the built-in detached runner. Each job now keeps a standard state directory and event logs:
+
+```text
+job_dir/
+  state/
+    task_spec.md
+    progress.json
+    directions_tried.json
+    iteration_log.jsonl
+  logs/
+    work.jsonl
+    heartbeat.jsonl
+```
+
+Event logs use JSONL: `{"ts":"...","source":"worker|guardian","level":"info|warn|error|decision","event":"...","detail":"..."}`. The business worker only writes its own status and artifacts; the guardian is limited to three actions: liveness-check, resume, and mark structurally stuck. It does not read or modify subtitles, translations, or TTS artifacts.
+
+Health checks use three signals:
 
 | Signal | File / tool | Purpose |
 | --- | --- | --- |
@@ -235,7 +251,7 @@ For long jobs, prefer the built-in detached runner. The current heartbeat design
 | Heartbeat | `pipeline_status.json` modification time | Detect whether the pipeline has stopped making stage progress |
 | Artifact growth | `chunk_*_qwen3tts_*.wav`, `output_*.mp4`, `merged_tts_*.wav` | Check whether output files are still being produced |
 
-If `status_job.py` reports `heartbeat_stale=true`, and the PID is gone or artifacts are no longer growing, resume with `resume_job.py --detached` in the same job directory. Do not delete chunks and do not switch to a new directory.
+If `status_job.py` reports `stalled=true`, the heartbeat is stale, the PID is gone, and no artifacts were produced recently. Resume in the same job directory with `resume_job.py --detached`, or start `watch_job.py --job-dir <job_dir>` so the guardian checks periodically and resumes automatically. After repeated stale checks, `state/progress.json` is marked with `guardian_status=structurally_stuck` and automatic resumes stop.
 
 ---
 

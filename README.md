@@ -227,7 +227,23 @@ ForcedAligner 的用途是把“已有文本”重新贴回音频，得到更细
 
 ## 🫀 长任务与心跳监控
 
-长任务建议用 skill 自带的 detached runner 启动。当前心跳监控不是自动重启 daemon，而是三层状态检查：
+长任务建议用 skill 自带的 detached runner 启动。现在每个 job 会维护标准状态目录和事件日志：
+
+```text
+job_dir/
+  state/
+    task_spec.md
+    progress.json
+    directions_tried.json
+    iteration_log.jsonl
+  logs/
+    work.jsonl
+    heartbeat.jsonl
+```
+
+事件日志统一为 JSONL：`{"ts":"...","source":"worker|guardian","level":"info|warn|error|decision","event":"...","detail":"..."}`。业务脚本只负责写自己的状态和产物；guardian 只允许做三件事：查活、恢复、标记结构性卡住，不读取或改写字幕、翻译和 TTS 产物。
+
+健康检查看三层信号：
 
 | 信号 | 文件/工具 | 用途 |
 | --- | --- | --- |
@@ -235,7 +251,7 @@ ForcedAligner 的用途是把“已有文本”重新贴回音频，得到更细
 | 心跳 | `pipeline_status.json` 修改时间 | 判断流程是否长时间没有阶段进度 |
 | 产物增长 | `chunk_*_qwen3tts_*.wav`、`output_*.mp4`、`merged_tts_*.wav` | 判断实际文件是否仍在增长 |
 
-如果 `status_job.py` 报 `heartbeat_stale=true`，并且 PID 不存在或产物不增长，用同一 job 目录执行 `resume_job.py --detached` 续跑；不要删除 chunk，不要换目录。
+如果 `status_job.py` 报 `stalled=true`，表示心跳已 stale、PID 不存在、且近期没有产物增长。可用同一 job 目录执行 `resume_job.py --detached` 续跑；也可以启动 `watch_job.py --job-dir <job_dir>` 让 guardian 定时检查并自动恢复。连续 stale 超过阈值后会写入 `state/progress.json` 的 `guardian_status=structurally_stuck`，停止自动续跑，避免无限重启。
 
 ## 🎯 使用方式
 
