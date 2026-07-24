@@ -1,40 +1,22 @@
 # video-dubber skill
 
-## Mac ASR
+这是仓库内的 skill 子目录说明。完整用户文档统一维护在仓库根目录 `README.md`；
+Agent 执行规则统一维护在本目录的 `SKILL.md`。这里保留一份极简摘要，避免双份 README 内容长期漂移。
 
-Mac Apple Silicon 本地 ASR 默认优先使用 `mlx-whisper` 的 `large-v3`：
+## 运行特点摘要
 
-```bash
-python scripts/run_pipeline.py \
-  --input-video "<video.mp4>" \
-  --asr-engine mlx-whisper \
-  --mlx-whisper-model mlx-community/whisper-large-v3-mlx \
-  --status "$job_dir/status.json" \
-  --log "$job_dir/run.log"
-```
+- 默认 faithful 翻译：不为了时间线删减内容；只有显式 `--translation-style concise|summary` 才允许压缩。
+- Mac ASR 路由：有 `NVIDIA_API_KEY` 优先 NVIDIA Riva；本地优先 `qwen3-asr-mlx`，可选 `qwen3-aligner-mode sentence` 精修句级边界；再回退 `mlx-whisper`。
+- NVIDIA key 申请地址：https://build.nvidia.com/models
+- 默认 Qwen3-TTS MLX；`--qwen3-tts-max-tokens 260` 用于限制单条生成拖长/卡住，不是删减文本。
+- 原声字幕版和克隆配音版是独立产物；默认先快速产出原声字幕版。
+- 长任务用 detached runner 启动，状态检查看 PID、`pipeline_status.json` 心跳和产物增长；stale 后用同一 job 目录 `resume_job.py --detached` 续跑。
 
-`--asr-engine auto` 在 Mac 上也会先尝试这条路线。只有 `mlx-whisper` 或模型不可用时，才会继续尝试显式 `whisper-cli --whisper-model` 或最终 `faster-whisper base int8` 兜底。
+## 关键文件
 
-`large-v3` 精度通常高于 `faster-whisper base`，但模型更大，首次使用会下载 3GB 级 Hugging Face 权重；后续默认复用 skill 目录下的 `.agent/hf-cache`，也可用 `MLX_WHISPER_HF_HOME` 指到已有缓存。`mlx` 需要可访问 Metal 设备，headless/Codex 沙箱可能需要外部执行方式。
-
-## Qwen3-ASR
-
-Qwen3-ASR 是可选本地路线，适合你明确想测试 `Qwen/Qwen3-ASR-1.7B` 或 `Qwen/Qwen3-ASR-0.6B` 时使用。时间戳输出需要额外配合 `Qwen/Qwen3-ForcedAligner-0.6B`。
-
-先安装可选依赖：
-
-```bash
-pip install -r /Users/hgis/myproject/video-editing/video-dubber/skills/video-dubber/requirements-qwen3-asr.txt
-```
-
-使用 1.7B：
-
-```bash
-python scripts/run_pipeline.py \
-  --input-video "<video.mp4>" \
-  --asr-engine qwen3-asr \
-  --qwen3-asr-model Qwen/Qwen3-ASR-1.7B \
-  --qwen3-asr-aligner Qwen/Qwen3-ForcedAligner-0.6B
-```
-
-Qwen3-ASR 权重大、环境要求也更高，不应在任务里静默下载。首次使用前要先确认磁盘、网络和 Python/torch 环境。
+- `SKILL.md`：Agent 必读执行规则
+- `scripts/run_pipeline.py`：主流程
+- `scripts/start_detached_job.py`：后台启动
+- `scripts/status_job.py`：PID + 心跳 + 产物增长检查
+- `scripts/resume_job.py`：同 job 续跑
+- `references/hardware_routing.md`：ASR/TTS 硬件路由

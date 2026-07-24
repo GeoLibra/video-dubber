@@ -5,6 +5,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+
+DEFAULT_MAX_TOKENS = 260
+
 from .tts_register import TTSBackend, register
 
 
@@ -45,6 +48,28 @@ def resolve_model_path(explicit: str | None = None, hf_offline: bool = False) ->
     )
 
 
+def model_cache_identity(model_path: str | None) -> str:
+    """Return a stable model identity that does not depend on local absolute paths."""
+    value = str(model_path or os.environ.get("QWEN3_TTS_MODEL") or "auto").strip()
+    if not value:
+        return "auto"
+    path = Path(value)
+    parts = path.parts
+    for idx, part in enumerate(parts):
+        if part.startswith("models--"):
+            repo = part.removeprefix("models--").replace("--", "/")
+            revision = None
+            if idx + 2 < len(parts) and parts[idx + 1] == "snapshots":
+                revision = parts[idx + 2]
+            return f"hf:{repo}@{revision or 'unknown'}"
+    if "/" in value and not path.exists():
+        return f"hf:{value}"
+    config = path / "config.json"
+    if config.exists():
+        return f"local:{path.name}"
+    return value
+
+
 class Qwen3TTSBackend(TTSBackend):
     """Load Qwen3-TTS once and reuse it for every subtitle segment."""
 
@@ -78,15 +103,17 @@ class Qwen3TTSBackend(TTSBackend):
         import numpy as np
         import soundfile as sf
 
+        max_tokens = int(kwargs.get("max_tokens") or os.environ.get("QWEN3_TTS_MAX_TOKENS") or DEFAULT_MAX_TOKENS)
         results = list(model.generate(
             text=text,
             ref_audio=str(ref_audio),
             ref_text=ref_text,
             lang_code=LANG_CODES.get(target_language, str(target_language).lower()),
-            temperature=0.8,
-            top_k=40,
-            top_p=0.95,
-            repetition_penalty=1.08,
+            temperature=float(kwargs.get("temperature", 0.8)),
+            top_k=int(kwargs.get("top_k", 40)),
+            top_p=float(kwargs.get("top_p", 0.95)),
+            repetition_penalty=float(kwargs.get("repetition_penalty", 1.08)),
+            max_tokens=max_tokens,
         ))
         if not results:
             raise RuntimeError("Qwen3-TTS returned no audio.")

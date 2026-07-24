@@ -9,10 +9,10 @@
 
 import argparse
 import json
+import os
 import shutil
 import sys
 import traceback
-from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -32,9 +32,10 @@ from core.lang import normalize_name, slug as lang_slug
 from core.subtitle import get_sub_source_text
 from core.translate import translate_subtitles
 from core.audio_builder import prepare_reference_audio, generate_and_merge, add_gap_audio
-from core.video_builder import synthesize_videos
+from core.video_builder import synthesize_videos, synthesize_original_video
 from core.verifier import verify_outputs
 from core.costs import TaskMeter
+from core.job_runtime import merge_status, atomic_write_json
 
 
 FFMPEG = shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg"
@@ -46,13 +47,7 @@ def log(msg, step=None):
 
 
 def update_status(status_file, status, msg="", **extra):
-    payload = {
-        "status": status,
-        "message": msg,
-        "last_seen": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        **extra,
-    }
-    Path(status_file).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return merge_status(status_file, status, msg, pid=os.getpid(), **extra)
 
 
 def preflight(job_dir, args):
@@ -98,6 +93,10 @@ def apply_translation_config(args, config):
     args.context_neighbor_lines = neighbors
     args.timing_risk_estimator = bool(translation.get("timing_risk_estimator", True))
     args.translation_timing = translation.get("timing", {})
+    if "--translation-style" not in getattr(args, "_explicit_cli_options", set()):
+        args.translation_style = translation.get("style", args.translation_style)
+    if args.translation_style not in {"faithful", "concise", "summary"}:
+        raise ValueError("translation.style must be faithful, concise, or summary")
     return args
 
 
@@ -119,6 +118,12 @@ def parse_args():
     parser.add_argument("--target-language", default="Chinese")
     parser.add_argument("--source-lang", default="en")
     parser.add_argument("--translation-model", default="deepseek")
+    parser.add_argument(
+        "--translation-style",
+        choices=["faithful", "concise", "summary"],
+        default="faithful",
+        help="faithful preserves all meaning and is the default; concise/summary are explicit opt-in compression modes.",
+    )
     parser.add_argument("--translation-batch-size", type=int, default=25)
     parser.add_argument("--translation-workers", type=int, default=1)
     parser.add_argument("--terms-file")
@@ -144,13 +149,29 @@ def parse_args():
     parser.add_argument("--auto-transcribe-ref", action="store_true")
     parser.add_argument(
         "--asr-engine",
-        choices=["auto", "mlx-whisper", "whisper", "faster-whisper", "qwen3-asr"],
+        choices=["auto", "qwen3-asr-mlx", "mlx-whisper", "whisper", "faster-whisper", "qwen3-asr"],
         default="auto",
     )
     parser.add_argument(
         "--mlx-whisper-model",
         default="mlx-community/whisper-large-v3-mlx",
-        help="MLX Whisper model repo/path used on Apple Silicon local ASR.",
+        help="MLX Whisper model repo/path used as Apple Silicon fallback ASR.",
+    )
+    parser.add_argument(
+        "--qwen3-asr-mlx-model",
+        default="mlx-community/Qwen3-ASR-1.7B-8bit",
+        help="MLX Qwen3-ASR model repo/path used on Apple Silicon local ASR.",
+    )
+    parser.add_argument(
+        "--qwen3-aligner-mlx-model",
+        default="mlx-community/Qwen3-ForcedAligner-0.6B-8bit",
+        help="Optional MLX Qwen3 ForcedAligner model repo/path for finer timestamp boundaries.",
+    )
+    parser.add_argument(
+        "--qwen3-aligner-mode",
+        choices=["off", "word", "sentence"],
+        default="sentence",
+        help="off keeps ASR segment timestamps; word emits word-level cues; sentence uses word alignment to rebuild natural sentence-level SRT.",
     )
     parser.add_argument("--whisper-model")
     parser.add_argument(
@@ -166,6 +187,12 @@ def parse_args():
     parser.add_argument("--tts-engine", choices=["qwen3-tts", "f5-mlx", "none"], default="qwen3-tts")
     parser.add_argument("--qwen3-model", default=None,
                         help="Local Qwen3-TTS MLX model path or compatible model id.")
+    parser.add_argument("--qwen3-tts-max-tokens", type=int, default=260,
+                        help="Per-chunk Qwen3-TTS generation cap. Prevents one subtitle from stalling indefinitely; not a translation/content truncation setting.")
+    parser.add_argument("--qwen3-tts-temperature", type=float, default=0.8,
+                        help="Qwen3-TTS sampling temperature.")
+    parser.add_argument("--qwen3-tts-chunk-timeout-sec", type=int, default=180,
+                        help="Per-chunk watchdog timeout for Qwen3-TTS; 0 disables.")
     parser.add_argument("--skip-separation", action="store_true")
     parser.add_argument("--no-segments", action="store_true")
     parser.add_argument("--hf-offline", action="store_true")
@@ -206,6 +233,11 @@ def parse_args():
     parser.add_argument("--proxy")
     parser.add_argument("--concurrent-fragments", type=int)
     parser.add_argument("--external-downloader")
+    early_group = parser.add_mutually_exclusive_group()
+    early_group.add_argument("--early-original-output", dest="early_original_output", action="store_true",
+                             help="Generate original-audio subtitled video right after ASS is ready.")
+    early_group.add_argument("--no-early-original-output", dest="early_original_output", action="store_false")
+    parser.set_defaults(early_original_output=True)
     parser.add_argument("--preserve-gap-audio", action="store_true")
     parser.add_argument("--gap-audio-gain-db", type=float, default=-6.0)
     parser.add_argument("--gap-pad-ms", type=int, default=60)
@@ -217,6 +249,10 @@ def parse_args():
         parser.error("--max-atempo must be >= 1.0.")
     if args.max_clip_ms < 0 or args.max_overhang_ms < 0:
         parser.error("--max-clip-ms and --max-overhang-ms must be >= 0.")
+    if args.qwen3_tts_max_tokens <= 0:
+        parser.error("--qwen3-tts-max-tokens must be > 0.")
+    if args.qwen3_tts_chunk_timeout_sec < 0:
+        parser.error("--qwen3-tts-chunk-timeout-sec must be >= 0.")
     if args.context_char_budget <= 0:
         parser.error("--context-char-budget must be > 0.")
     if args.context_neighbor_lines < 0:
@@ -342,6 +378,21 @@ def main():
         )
         meter.phase_end()
 
+        early_original_video = None
+        if getattr(args, "early_original_output", True):
+            meter.phase_start("original_subtitled_video")
+            update_status(args.status, "running", "synthesizing original subtitled video", stage="original_subtitled_video")
+            early_original_video = synthesize_original_video(video_path, ass_path, job_dir, args)
+            update_status(
+                args.status,
+                "running",
+                "original subtitled video ready",
+                stage="original_subtitled_video",
+                original_video=early_original_video,
+                early_original_output=True,
+            )
+            meter.phase_end()
+
         if args.tts_engine == "none":
             tts_audio, tts_report = None, []
             log("Subtitle-only mode: skip reference audio and voice cloning.", "TTS")
@@ -386,10 +437,10 @@ def main():
 
         cost_summary = meter.report()
         if args.cost_out:
-            Path(args.cost_out).write_text(json.dumps(cost_summary, ensure_ascii=False, indent=2), encoding="utf-8")
+            atomic_write_json(args.cost_out, cost_summary)
         verification["cost"] = cost_summary
         verification_path_final = Path(verification_path)
-        verification_path_final.write_text(json.dumps(verification, ensure_ascii=False, indent=2), encoding="utf-8")
+        atomic_write_json(verification_path_final, verification)
 
         update_status(
             args.status,

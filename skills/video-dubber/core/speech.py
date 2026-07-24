@@ -1,6 +1,8 @@
+import json
 import os
 import platform
 import shutil
+import sys
 from pathlib import Path
 
 import pysubs2
@@ -78,6 +80,9 @@ def _append_word_chunk(subs, words):
 
 
 DEFAULT_MLX_WHISPER_MODEL = "mlx-community/whisper-large-v3-mlx"
+DEFAULT_QWEN3_ASR_MLX_MODEL = "mlx-community/Qwen3-ASR-1.7B-8bit"
+DEFAULT_QWEN3_ALIGNER_MLX_MODEL = "mlx-community/Qwen3-ForcedAligner-0.6B-8bit"
+
 
 
 def _normalize_whisper_language(source_lang):
@@ -180,6 +185,8 @@ def transcribe_audio_faster_whisper(audio_path, out_dir):
 
 def transcribe_audio_local(audio_path, out_dir, args):
     engine = getattr(args, "asr_engine", "auto")
+    if engine == "qwen3-asr-mlx":
+        return transcribe_audio_qwen3_mlx(audio_path, out_dir, args)
     if engine == "mlx-whisper":
         return transcribe_audio_mlx_whisper(audio_path, out_dir, args)
     if engine == "whisper":
@@ -189,6 +196,10 @@ def transcribe_audio_local(audio_path, out_dir, args):
 
     errors = []
     if platform.system() == "Darwin":
+        try:
+            return transcribe_audio_qwen3_mlx(audio_path, out_dir, args)
+        except Exception as exc:
+            errors.append(f"qwen3-asr-mlx: {exc}")
         try:
             return transcribe_audio_mlx_whisper(audio_path, out_dir, args)
         except Exception as exc:
@@ -232,6 +243,193 @@ def _append_qwen3_timestamp(subs, start_s, end_s, text):
     text = (text or "").strip()
     if text and et > st:
         subs.append(pysubs2.SSAEvent(start=st, end=et, text=text))
+
+
+
+def _qwen3_mlx_cache_home():
+    cache_home = Path(__file__).resolve().parents[1] / ".agent" / "hf-cache"
+    cache_home.mkdir(parents=True, exist_ok=True)
+    return cache_home
+
+
+def _qwen3_mlx_env():
+    env = os.environ.copy()
+    cache_home = str(_qwen3_mlx_cache_home())
+    env["HF_HOME"] = env.get("QWEN3_ASR_MLX_HF_HOME") or env.get("MLX_AUDIO_HF_HOME") or env.get("HF_HOME") or cache_home
+    env.setdefault("HF_HUB_DISABLE_XET", "1")
+    return env
+
+
+def _extract_qwen3_words_from_json(data):
+    words = []
+    for sentence in data.get("sentences", []) or []:
+        for token in sentence.get("tokens", []) or []:
+            text = (token.get("text") or token.get("word") or "").strip()
+            start = token.get("start")
+            end = token.get("end")
+            if text and start is not None and end is not None and float(end) > float(start):
+                words.append({"text": text, "start": float(start), "end": float(end)})
+    for segment in data.get("segments", []) or []:
+        for token in segment.get("words", []) or segment.get("tokens", []) or []:
+            text = (token.get("text") or token.get("word") or "").strip()
+            start = token.get("start")
+            end = token.get("end")
+            if text and start is not None and end is not None and float(end) > float(start):
+                words.append({"text": text, "start": float(start), "end": float(end)})
+    return sorted(words, key=lambda w: (w["start"], w["end"]))
+
+
+def _subs_from_qwen3_words(words, mode="sentence"):
+    subs = pysubs2.SSAFile()
+    if not words:
+        return subs
+    chunk = []
+    max_words = 14 if mode == "sentence" else 1
+    max_seconds = 6.0 if mode == "sentence" else 0.0
+    sentence_endings = tuple(".?!。！？…")
+    for word in words:
+        chunk.append(word)
+        elapsed = chunk[-1]["end"] - chunk[0]["start"]
+        should_flush = (
+            len(chunk) >= max_words
+            or (max_seconds and elapsed >= max_seconds)
+            or word["text"].endswith(sentence_endings)
+            or mode == "word"
+        )
+        if should_flush:
+            _append_qwen3_timestamp(
+                subs,
+                chunk[0]["start"],
+                chunk[-1]["end"],
+                " ".join(item["text"] for item in chunk).strip(),
+            )
+            chunk = []
+    if chunk:
+        _append_qwen3_timestamp(
+            subs,
+            chunk[0]["start"],
+            chunk[-1]["end"],
+            " ".join(item["text"] for item in chunk).strip(),
+        )
+    return subs
+
+
+def _subs_from_qwen3_aligner_json(json_path, mode="sentence"):
+    data = json.loads(Path(json_path).read_text(encoding="utf-8"))
+    if mode == "sentence":
+        subs = pysubs2.SSAFile()
+        for sentence in data.get("sentences", []) or []:
+            text = (sentence.get("text") or "").strip()
+            start = sentence.get("start")
+            end = sentence.get("end")
+            if text and start is not None and end is not None:
+                _append_qwen3_timestamp(subs, start, end, text)
+        if len(subs) > 0:
+            return subs
+    return _subs_from_qwen3_words(_extract_qwen3_words_from_json(data), mode=mode)
+
+
+def _plain_text_from_subs(subs):
+    return " ".join(
+        event.text.replace("\\N", " ").replace("\n", " ").strip()
+        for event in subs
+        if event.text and event.text.strip()
+    ).strip()
+
+
+def transcribe_audio_qwen3_mlx(audio_path, out_dir, args):
+    srt_path = Path(out_dir) / "raw_audio.srt"
+    if srt_path.exists():
+        return pysubs2.load(str(srt_path), encoding="utf-8")
+
+    prefix = Path(out_dir) / "raw_audio_qwen3_mlx"
+    asr_srt = prefix.with_suffix(".srt")
+    env = _qwen3_mlx_env()
+    model = (
+        getattr(args, "qwen3_asr_mlx_model", None)
+        or os.environ.get("QWEN3_ASR_MLX_MODEL")
+        or DEFAULT_QWEN3_ASR_MLX_MODEL
+    )
+    language = _qwen3_language(getattr(args, "source_lang", None)) or "English"
+    print(f"[ASR] Using Qwen3-ASR MLX: {model}", flush=True)
+    run(
+        [
+            sys.executable,
+            "-m",
+            "mlx_audio.stt.generate",
+            "--model",
+            model,
+            "--audio",
+            str(audio_path),
+            "--output-path",
+            str(prefix),
+            "--format",
+            "srt",
+            "--language",
+            language,
+            "--chunk-duration",
+            "30",
+        ],
+        "ASR",
+        env=env,
+    )
+    if not asr_srt.exists():
+        raise RuntimeError(f"Qwen3-ASR MLX did not create expected SRT: {asr_srt}")
+
+    subs = pysubs2.load(str(asr_srt), encoding="utf-8")
+    mode = (getattr(args, "qwen3_aligner_mode", "sentence") or "sentence").strip().lower()
+    if mode not in {"off", "word", "sentence"}:
+        raise RuntimeError("--qwen3-aligner-mode must be off, word, or sentence")
+
+    if mode != "off":
+        aligner_model = (
+            getattr(args, "qwen3_aligner_mlx_model", None)
+            or os.environ.get("QWEN3_ALIGNER_MLX_MODEL")
+            or DEFAULT_QWEN3_ALIGNER_MLX_MODEL
+        )
+        aligner_prefix = Path(out_dir) / "raw_audio_qwen3_mlx_aligned"
+        aligner_json = aligner_prefix.with_suffix(".json")
+        transcript_text = _plain_text_from_subs(subs)
+        if transcript_text:
+            print(f"[ASR] Refining timestamps with Qwen3 ForcedAligner MLX: {aligner_model} ({mode})", flush=True)
+            try:
+                run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "mlx_audio.stt.generate",
+                        "--model",
+                        aligner_model,
+                        "--audio",
+                        str(audio_path),
+                        "--output-path",
+                        str(aligner_prefix),
+                        "--format",
+                        "json",
+                        "--language",
+                        language,
+                        "--text",
+                        transcript_text,
+                    ],
+                    "ASR",
+                    env=env,
+                )
+                if aligner_json.exists():
+                    aligned_subs = _subs_from_qwen3_aligner_json(aligner_json, mode=mode)
+                    if len(aligned_subs) > 0:
+                        subs = aligned_subs
+                    else:
+                        print("[ASR] ForcedAligner returned no usable timestamps; keeping ASR segments.", flush=True)
+                else:
+                    print(f"[ASR] ForcedAligner JSON missing ({aligner_json}); keeping ASR segments.", flush=True)
+            except Exception as exc:
+                print(f"[ASR] ForcedAligner failed; keeping ASR segments: {exc}", flush=True)
+
+    if len(subs) == 0:
+        raise RuntimeError("Qwen3-ASR MLX returned no transcription text.")
+    subs.save(str(srt_path))
+    return subs
+
 
 
 def transcribe_audio_qwen3(audio_path, out_dir, args):
@@ -309,6 +507,9 @@ def transcribe_audio(audio_path, out_dir, args):
         subs.save(str(srt_path))
         return subs
 
+    if getattr(args, "asr_engine", "auto") == "qwen3-asr-mlx":
+        return transcribe_audio_qwen3_mlx(audio_path, out_dir, args)
+
     if getattr(args, "asr_engine", "auto") == "qwen3-asr":
         return transcribe_audio_qwen3(audio_path, out_dir, args)
 
@@ -317,7 +518,7 @@ def transcribe_audio(audio_path, out_dir, args):
         subs.save(str(srt_path))
         return subs
 
-    if getattr(args, "asr_engine", "auto") in {"mlx-whisper", "faster-whisper"}:
+    if getattr(args, "asr_engine", "auto") in {"qwen3-asr-mlx", "mlx-whisper", "faster-whisper"}:
         subs = transcribe_audio_local(audio_path, out_dir, args)
         subs.save(str(srt_path))
         return subs

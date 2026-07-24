@@ -30,11 +30,32 @@ allowed-tools:
 10. **完成后必须验证**：检查视频/音频流时长、字幕条数、TTS 生成/跳过/错误数，并输出 `verification_report_<lang>_<mode>.json`。
 11. **音色质量优先于盲目重生**：如果已有 `output_cloned_<lang>_<mode>_<engine>.mp4` 的音色更像原说话人，不要用新的参考片段或长分组全量覆盖。先保留旧版作为音色基线，再用 strict sync 重建字幕和 TTS 文本。
 12. **非语音标记不进画面**：`[MUSIC]`、`[音乐]`、`[APPLAUSE]`、`[掌声]`、`music playing` 等只用于判断静音/背景音 gap，必须跳过 TTS，并把 ASS 屏幕字幕写空；不要把方括号提示烧进最终视频。
-13. **原声硬字幕是独立路径**：用户说“不要克隆声音 / 只加中文字幕 / 原声保留 / 只下载并加字幕”时，不要进入参考音频、TTS、voice clone 或 `output_cloned_*` 流程；只生成原音轨硬字幕视频和字幕验证报告。
-14. **Qwen3-TTS 是默认克隆后端**：优先复用已存在的 1.7B BF16 MLX 模型，模型只加载一次并循环生成全部 chunk；F5 保留为显式兼容后端，不再作为默认值。
+13. **原声硬字幕是独立路径**：用户说“不要克隆声音 / 只加中文字幕 / 原声保留 / 只下载并加字幕”时，不要进入参考音频、TTS、voice clone 或 `output_cloned_*` 流程；只生成原音轨硬字幕视频和字幕验证报告。克隆配音任务默认也会在 ASS 准备好后先快速产出 `output_original_<lang>_<mode>.mp4`；机器资源允许时可与 TTS 阶段并行，资源紧张时保持串行。
+14. **Qwen3-TTS 是默认克隆后端**：优先复用已存在的 1.7B BF16 MLX 模型，模型只加载一次并循环生成全部 chunk；默认 `--qwen3-tts-max-tokens 260` 防止单条字幕采样卡住，这不是删减翻译内容；F5 保留为显式兼容后端，不再作为默认值。
 15. **多模型产物必须隔离**：chunk、合并音频、对齐报告和克隆视频文件名都带引擎标识，避免 Qwen3-TTS、F5 或后续后端互相覆盖或误命中缓存。
-16. **禁止为对齐自动删减内容**：电影、访谈、教程等默认只允许等义翻译，不得为了塞入时间窗自动删除语气、否定、条件、数字、术语、伏笔或其他信息。用户明确要求摘要/短视频改写时才允许概括。
+16. **禁止为对齐自动删减内容**：默认 `--translation-style faithful`，电影、访谈、教程等只允许等义翻译，不得为了塞入时间窗自动删除语气、否定、条件、数字、术语、伏笔或其他信息。只有用户明确指定 `--translation-style concise|summary` 时才允许压缩改写。
 17. **加速阈值是报告阈值，不是裁尾阈值**：超窗时可以超过建议倍率完成输出，但必须保留完整句子并在最终报告中列出时间点、倍率和风险等级；不能因为 `quality_warning` 或高倍率阻止用户要求的最终输出。
+
+
+## 长任务工程化工具
+
+长视频默认使用仓库内正式脚本，而不是临时 `nohup`：
+
+```bash
+python scripts/start_detached_job.py --job-dir "$job_dir" -- \
+  python scripts/run_pipeline.py ... --status "$job_dir/pipeline_status.json" --log "$job_dir/pipeline.log"
+python scripts/status_job.py --job-dir "$job_dir"
+python scripts/resume_job.py --job-dir "$job_dir" --detached
+python scripts/stop_job.py --job-dir "$job_dir"
+python scripts/cleanup_job.py --job-dir "$job_dir" --remove-old-chunk-hashes
+```
+
+进程健康检查至少看三层：PID、`status.json` 心跳、产物增长。TTS 每个 chunk 后必须更新
+`tts_done`、`tts_total`、`tts_last_index`、`tts_last_atempo_ratio`、`tts_extreme_count`。
+Agent 查询进度时只读 `status.json`、最近少量日志和产物数量，不要把完整日志/SRT/report 贴回对话。
+
+关键产物应尽量原子写入：先写 `.tmp`，完成后 rename/replace 为正式文件。清理脚本默认不得删除
+`.agent/hf-cache`、`.venv` 或任何共享模型缓存。
 
 ## 默认字体 Profile
 
@@ -214,14 +235,17 @@ YouTube 高清下载策略：
 ### 3. ASR
 
 默认云端优先：
-1. 有 `NVIDIA_API_KEY` 时优先尝试 NVIDIA Riva gRPC（`grpc.nvcf.nvidia.com:443`，function-id `b702f636-f60c-4a3d-a6f4-f3568c13bd7d`）。
-2. 失败后降级本地。Mac Apple Silicon 首选 `mlx-whisper + mlx-community/whisper-large-v3-mlx`；只有 MLX 路线不可用时才考虑 `whisper-cli + --whisper-model` 或 `faster-whisper base` 兜底。
+1. 有 `NVIDIA_API_KEY` 时优先尝试 NVIDIA Riva gRPC（`grpc.nvcf.nvidia.com:443`，function-id `b702f636-f60c-4a3d-a6f4-f3568c13bd7d`）。申请地址：https://build.nvidia.com/models 。
+2. 失败后降级本地。Mac Apple Silicon 首选 `qwen3-asr-mlx + mlx-community/Qwen3-ASR-1.7B-8bit`；可选 `mlx-community/Qwen3-ForcedAligner-0.6B-8bit` 做词级对齐并重建句级 SRT。只有 Qwen3 MLX 路线不可用时才考虑 `mlx-whisper + mlx-community/whisper-large-v3-mlx`、`whisper-cli + --whisper-model` 或 `faster-whisper base` 兜底。
 
 本地 ASR 路由：
 - 先跑 10-15 秒音频 smoke test，确认模型、语言识别和字幕输出格式。
-- Mac 本地默认使用 `--asr-engine auto --mlx-whisper-model mlx-community/whisper-large-v3-mlx`；这是高质量本地路线，通常比 `faster-whisper base` 精度更高。
-- 可显式指定 `--asr-engine mlx-whisper` 强制使用 MLX large-v3；模型缓存由 Hugging Face 管理，不要每个 job 重复下载。
+- Mac 本地默认使用 `--asr-engine auto`，优先 `qwen3-asr-mlx + mlx-community/Qwen3-ASR-1.7B-8bit`。
+- `Qwen3-ASR MLX` 负责转写，直接给句段级时间戳，够生成普通 SRT；省内存可改 `--qwen3-asr-mlx-model mlx-community/Qwen3-ASR-0.6B-8bit`。
+- `Qwen3-ForcedAligner MLX` 负责把“已有文本”重新对齐到音频，给更细的词级时间戳。默认 `--qwen3-aligner-mode sentence`：不逐词显示字幕，只用词级边界重算每条字幕 start/end，最终仍输出自然句级 SRT。
+- 可显式指定 `--asr-engine mlx-whisper` 强制使用 `mlx-whisper + mlx-community/whisper-large-v3-mlx` 作为稳定 fallback；模型缓存由 Hugging Face 管理，不要每个 job 重复下载。
 - `mlx` 必须能访问 Metal 设备；Codex/CI/headless 沙箱若报 `No Metal device available`，不要误判为模型损坏，改用允许访问 Metal 的外部执行方式跑 ASR。
+- `qwen3-asr` 是官方 `qwen-asr`/PyTorch 兼容路线，不是 Mac 默认高性能路线；在 Mac/Codex 环境通常会跑 CPU。若需要时间戳，需配 `Qwen/Qwen3-ForcedAligner-0.6B` 或本地 aligner 快照。
 - `whisper-cli` 只作为显式兼容路线：`--asr-engine whisper --whisper-model <ggml 模型路径>`。在 Apple Silicon 上若默认 Metal 崩溃，立即改用 `--no-gpu` 做 CPU smoke test。
 - `faster-whisper` 仅作为最终兜底；不要把 `base int8` 当作高质量默认 ASR。
 
@@ -483,30 +507,27 @@ uv pip install -r requirements-f5-pytorch.txt  # PyTorch 后端
 
 续跑前先确认没有同一 job 的旧进程还在运行。若无法查看进程，就至少检查 chunk 数量和最终输出文件时间戳；避免两个 TTS 进程同时写同一目录。
 
-### 心跳监护（Heartbeat Watchdog）
+### 心跳监控（Heartbeat / Status Check）
 
-长任务（翻译 >500 条、TTS >50 段、FFmpeg 长视频合成）启动前应注册监护，参照三层模式：
+当前实现是“可恢复的状态监控”，不是常驻自动重启 daemon。长任务建议用
+`scripts/start_detached_job.py` 启动；它会写 `job_pid.txt`，主流程会持续写
+`pipeline_status.json`，TTS 每个 chunk 完成后也会落盘产物。
 
-| 层 | 形式 | 依赖会话 | 职责 |
+健康检查看三层：
+
+| 层 | 信号 | 当前实现 | 作用 |
 |----|------|----------|------|
-| **L2** | 脚本内 `last_seen` 更新 | 否 | 每个关键阶段更新 `status.json` 的时间戳 |
-| **L1** | 同一会话的后台监视器 | 是 | 每分钟轮询 `last_seen`，超时则重启卡死阶段 |
-| **L0** | cron / `launchctl` 兜底 | 否 | 监视器不可靠时仍能发现过期 |
+| **PID** | `job_pid.txt` + `os.kill(pid, 0)` | `status_job.py` | 判断启动的后台进程是否还活着 |
+| **心跳** | `pipeline_status.json` 修改时间 | `status_job.py --stale-sec` | 判断流程是否长时间没有阶段进度 |
+| **产物增长** | `chunk_*_qwen3tts_*.wav` / `output_*.mp4` / `merged_tts_*.wav` mtime 与数量 | `status_job.py` | 判断即使 status 没更新，实际文件是否仍在增长 |
 
-`status.json` 扩展字段：
+`status_job.py` 会输出 `pid_alive`、`last_seen_age_sec`、`heartbeat_stale`、
+`chunk_count`、`last_artifact_age_sec` 和已有输出文件。若 `heartbeat_stale=true`
+且 PID 不存在或产物不增长，使用同一 job 目录执行 `scripts/resume_job.py --detached`
+恢复；不要换 job 目录，不要删除 chunk。
 
-```json
-{
-  "status": "running",
-  "stage": "tts",
-  "last_seen": "2026-01-15T10:23:00Z",
-  "stage_timeout_min": 30
-}
-```
-
-阈值：翻译阶段 15 分钟无更新 → 卡死；TTS 阶段 30 分钟无更新 → 卡死；最终合成 10 分钟无更新 → 卡死。正常运行时不要按分钟向用户自然语言汇报。
-
-`run_pipeline.py` 在翻译每批、TTS 每生成一个 chunk、合成前后各写一次 `last_seen`。L1 监视器每分钟读 `status.json`，超时 `stage_timeout_min × 3` 则执行阶段重启命令并写入 `heartbeat.log`，不做其他操作。L0 若发现 `last_seen` 超过 2 小时，无论监视器是否存在，都重新拉起脚本。
+默认不按分钟向用户自然语言汇报，只在阶段完成、状态异常、需要恢复、或产物完成时汇报。
+后续若要升级成真正 L1/L0 自动守护，应另加明确的 watcher/launchctl 脚本，不能在文档里假定已经存在。
 
 意外中断后可以继续：不要换 job 目录，不要删除阶段产物，使用同一条命令重跑。脚本会复用：
 - `raw_video.mp4` / `raw_audio.wav`

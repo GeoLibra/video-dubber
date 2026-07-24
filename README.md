@@ -39,9 +39,9 @@
 | --- | --- |
 | 🔁 **任务可续跑** | 长视频任务中断后，同目录续跑，已完成的步骤自动跳过。 |
 | 💰 **节省 Token** | 翻译只传字幕编号 + 文本，不反复发送时间轴；已缓存内容不重复翻译。 |
-| ❤️ **心跳监控** | 长时间任务记录阶段进度，方便发现并处理卡住的阶段。 |
+| ❤️ **心跳监控** | 后台任务记录 PID、状态心跳和产物增长，方便发现 stale 并用同一 job 续跑。 |
 | 🏷️ **平台字幕优先** | 有平台自带字幕时优先使用，减少 ASR 转写时间和错误。 |
-| 🚀 **NVIDIA Riva 优先** | 配置 `NVIDIA_API_KEY` 后 ASR 优先走 NVIDIA Riva gRPC，不可用时回退本地 Whisper。 |
+| 🚀 **ASR 分层路由** | 有 `NVIDIA_API_KEY` 时优先 NVIDIA Riva；Mac 本地优先 Qwen3-ASR MLX + 可选 ForcedAligner；再回退 mlx-whisper / Whisper。 |
 | 🤖 **Qwen3-TTS 默认** | Apple Silicon 使用 MLX 版本，模型单次加载并复用 chunk；F5 保留为兼容后端。 |
 | 🧪 **多模型可比** | Qwen3-TTS、F5 等输出带引擎后缀和对齐报告，不会互相覆盖。 |
 | 🎬 **内容完整优先** | 超时不自动删台词、不裁句尾；安全合并同角色语义窗口，必要时局部加速并报告时间点与倍率。 |
@@ -181,7 +181,7 @@ models:
 
 ### NVIDIA Riva ASR（可选）
 
-除了翻译，`NVIDIA_API_KEY` 还可用于 **NVIDIA Riva** 语音转字幕（ASR）。填写后，ASR 阶段优先走 Riva gRPC，不可用时自动回退本地 Whisper。
+除了翻译，`NVIDIA_API_KEY` 还可用于 **NVIDIA Riva** 语音转字幕（ASR）。填写后，ASR 阶段优先走 Riva gRPC；云端不可用或没有 key 时，Mac Apple Silicon 本地优先走 Qwen3-ASR MLX，可选 Qwen3-ForcedAligner MLX 细化时间戳，再回退到 mlx-whisper / Whisper。
 
 #### 申请 NVIDIA API Key
 
@@ -199,6 +199,22 @@ NVIDIA_API_KEY=你的NVIDIA密钥
 
 > ⚠️ `NVIDIA_API_KEY` 可以同时用于 Riva ASR 和 NVIDIA 翻译模型，但翻译是否走 NVIDIA 取决于 `model-config.yaml` 中的配置，不是只填 Key 就自动切换。
 
+### ASR 路由补充
+
+推荐优先级：
+
+1. 有 `NVIDIA_API_KEY`：NVIDIA Riva 云端 ASR。Key 申请地址：[https://build.nvidia.com/models](https://build.nvidia.com/models)
+2. Mac Apple Silicon 本地高质量：`--asr-engine qwen3-asr-mlx --qwen3-asr-mlx-model mlx-community/Qwen3-ASR-1.7B-8bit`
+3. Mac 省内存/快速：`mlx-community/Qwen3-ASR-0.6B-8bit`
+4. 时间戳增强：`--qwen3-aligner-mode sentence --qwen3-aligner-mlx-model mlx-community/Qwen3-ForcedAligner-0.6B-8bit`
+5. 稳定兜底：`mlx-whisper + mlx-community/whisper-large-v3-mlx`，最后才是 whisper.cpp / faster-whisper。
+
+ForcedAligner 的用途是把“已有文本”重新贴回音频，得到更细的词级时间戳；默认 `sentence` 模式只用它重算句子边界，最终字幕仍是自然句级，不会一词一条。
+
+### 翻译风格
+
+默认 `--translation-style faithful`：忠实等义翻译，不为了时间窗删内容。只有明确指定 `--translation-style concise` 或 `--translation-style summary` 时，才允许压缩/摘要改写。
+
 ### 其他配置
 
 | 需求 | 配置方式 |
@@ -208,6 +224,18 @@ NVIDIA_API_KEY=你的NVIDIA密钥
 | 📝 双语字幕 | 告诉 Agent "做成中英双语字幕" |
 
 ---
+
+## 🫀 长任务与心跳监控
+
+长任务建议用 skill 自带的 detached runner 启动。当前心跳监控不是自动重启 daemon，而是三层状态检查：
+
+| 信号 | 文件/工具 | 用途 |
+| --- | --- | --- |
+| PID | `job_pid.txt` / `status_job.py` | 判断后台进程是否还活着 |
+| 心跳 | `pipeline_status.json` 修改时间 | 判断流程是否长时间没有阶段进度 |
+| 产物增长 | `chunk_*_qwen3tts_*.wav`、`output_*.mp4`、`merged_tts_*.wav` | 判断实际文件是否仍在增长 |
+
+如果 `status_job.py` 报 `heartbeat_stale=true`，并且 PID 不存在或产物不增长，用同一 job 目录执行 `resume_job.py --detached` 续跑；不要删除 chunk，不要换目录。
 
 ## 🎯 使用方式
 

@@ -16,13 +16,22 @@ def ass_filter(ass_path, args):
     return f"ass='{escape_filter_path(ass_path)}':fontsdir='{escape_filter_path(font_dir)}'"
 
 
-def synthesize_videos(video_path, no_vocals_path, tts_audio, ass_path, out_dir, video_duration_s, args):
+def _tmp_output(path):
+    path = Path(path)
+    return path.with_name(path.name + ".tmp")
+
+
+def _replace_tmp(tmp, final):
+    tmp = Path(tmp)
+    final = Path(final)
+    if tmp.exists():
+        tmp.replace(final)
+
+
+def synthesize_original_video(video_path, ass_path, out_dir, args):
     suffix = f"{lang_slug(args.target_language)}_{args.subtitle_mode}"
     out_orig = Path(out_dir) / f"output_original_{suffix}.mp4"
-    engine_slug = args.tts_engine.replace("-", "")
-    out_cloned = Path(out_dir) / f"output_cloned_{suffix}_{engine_slug}.mp4"
     vf = ass_filter(ass_path, args)
-
     if not _is_current(out_orig, [video_path, ass_path]):
         run([
             FFMPEG, "-hide_banner", "-loglevel", "error", "-y",
@@ -30,8 +39,20 @@ def synthesize_videos(video_path, no_vocals_path, tts_audio, ass_path, out_dir, 
             "-vf", vf,
             "-c:v", "libx264",
             "-c:a", "aac", "-b:a", "192k",
-            str(out_orig),
+            str(_tmp_output(out_orig)),
         ], "SYNTHESIS")
+        _replace_tmp(_tmp_output(out_orig), out_orig)
+    return str(out_orig)
+
+
+def synthesize_videos(video_path, no_vocals_path, tts_audio, ass_path, out_dir, video_duration_s, args):
+    suffix = f"{lang_slug(args.target_language)}_{args.subtitle_mode}"
+    out_orig = Path(out_dir) / f"output_original_{suffix}.mp4"
+    engine_slug = args.tts_engine.replace("-", "")
+    out_cloned = Path(out_dir) / f"output_cloned_{suffix}_{engine_slug}.mp4"
+    vf = ass_filter(ass_path, args)
+
+    synthesize_original_video(video_path, ass_path, out_dir, args)
 
     if args.tts_engine == "none":
         return str(out_orig), str(out_orig)
@@ -53,7 +74,7 @@ def synthesize_videos(video_path, no_vocals_path, tts_audio, ass_path, out_dir, 
                 "-c:v", "libx264",
                 "-c:a", "aac", "-b:a", "192k",
                 "-movflags", "+faststart",
-                str(out_cloned),
+                str(_tmp_output(out_cloned)),
             ]
         else:
             cmd = [
@@ -67,8 +88,9 @@ def synthesize_videos(video_path, no_vocals_path, tts_audio, ass_path, out_dir, 
                 "-c:v", "libx264",
                 "-c:a", "aac", "-b:a", "192k",
                 "-movflags", "+faststart",
-                str(out_cloned),
+                str(_tmp_output(out_cloned)),
             ]
         run(cmd, "SYNTHESIS")
+        _replace_tmp(_tmp_output(out_cloned), out_cloned)
 
     return str(out_orig), str(out_cloned)

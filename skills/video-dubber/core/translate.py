@@ -41,6 +41,28 @@ DEFAULT_TIMING_RATES = {
 }
 
 
+TRANSLATION_STYLE_RULES = {
+    "faithful": (
+        "Translation style: faithful. Preserve all meaning, negation, conditions, numbers, named entities, "
+        "technical terms, jokes, plot points, and causal relations. Do not omit content just to fit timing. "
+        "If the subtitle window is short, keep the full meaning; downstream audio alignment will report or speed-fit timing pressure."
+    ),
+    "concise": (
+        "Translation style: concise. You may make natural, equivalent compression for subtitle readability, "
+        "but do not remove critical facts, negation, conditions, numbers, named entities, technical terms, or plot points."
+    ),
+    "summary": (
+        "Translation style: summary. The user explicitly allows summarization. Preserve the main point and important facts, "
+        "but shorter paraphrase is allowed."
+    ),
+}
+
+
+def translation_style_rule(args):
+    style = getattr(args, "translation_style", "faithful") or "faithful"
+    return TRANSLATION_STYLE_RULES.get(style, TRANSLATION_STYLE_RULES["faithful"])
+
+
 def _terms_file_hash(path):
     if not path:
         return sha256(b"").hexdigest()
@@ -62,6 +84,7 @@ def _translation_cache_identity(subs, args, context):
         ),
         "source_hash": source_hash(subs),
         "target_language": args.target_language,
+        "translation_style": getattr(args, "translation_style", "faithful"),
         "translation_model": resolve_model_identity(args),
         "content_kind": (
             "source" if getattr(args, "subtitle_mode", "target") == "source" else "translated"
@@ -353,6 +376,7 @@ def _build_prompt(args, batch, display_rule, user_template, context, subs):
     format_values = {
         "target_language": args.target_language,
         "display_rule": display_rule,
+        "translation_style_rule": translation_style_rule(args),
         "video_context": context.get("summary") or "(none)",
         "terminology": terminology,
         "reference_lines": reference_lines,
@@ -369,6 +393,7 @@ Return strict JSON:
 Rules:
 - Preserve every id exactly.
 - {display_rule}
+- {format_values['translation_style_rule']}
 - Keep technical proper nouns in English when appropriate.
 
 === VIDEO CONTEXT ===
@@ -591,6 +616,7 @@ def translate_subtitles(subs, out_dir, args):
         )
 
     messages = []
+    messages.append({"role": "system", "content": translation_style_rule(args)})
     if system_prompt:
         messages.append({"role": "system", "content": system_prompt})
 

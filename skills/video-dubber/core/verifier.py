@@ -3,6 +3,7 @@ from pathlib import Path
 
 from .lang import slug as lang_slug
 from .media import probe_streams
+from .job_runtime import atomic_write_json
 
 
 def verify_outputs(
@@ -68,6 +69,8 @@ def verify_outputs(
             "tts_abrupt_speed_change_count": len(abrupt_speed_changes),
             "tts_abrupt_speed_changes": abrupt_speed_changes,
             "tts_content_policy": "preserve_full_text_never_crop_sentence_end",
+            "completed_with_speed_risks": bool(speed_notices),
+            "content_preserved": True,
         })
 
     if translation_context_info:
@@ -94,7 +97,7 @@ def verify_outputs(
     report_path = Path(out_dir) / (
         f"verification_report_{lang_slug(args.target_language)}_{args.subtitle_mode}{engine_suffix}.json"
     )
-    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    atomic_write_json(report_path, report)
     if not is_subtitle_only and report.get("tts_errors"):
         raise RuntimeError(f"TTS errors found: {report['tts_errors']}. See {report_path}")
     return str(report_path), report

@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import signal
 import time
 from pathlib import Path
 
@@ -8,6 +9,7 @@ from .media import FFMPEG, run
 from .lang import slug as lang_slug
 from .subtitle import normalize_spaces, is_non_speech
 from .tts_register import get_engine
+from .job_runtime import atomic_write_json, merge_status
 
 
 def extract_reference_audio_from_subs(subs, vocals_path, out_dir):
@@ -152,6 +154,47 @@ def _fit_audio_to_duration(audio, target_ms, tmp_dir, args):
     return audio, stats
 
 
+
+def _tts_model_identity(engine_name, resolved_model):
+    if engine_name == "qwen3-tts":
+        try:
+            from .tts_qwen3_mlx import model_cache_identity
+            return model_cache_identity(resolved_model)
+        except Exception:
+            pass
+    return str(resolved_model or engine_name)
+
+
+class _ChunkTimeout:
+    def __init__(self, seconds):
+        self.seconds = int(seconds or 0)
+        self.previous = None
+
+    def __enter__(self):
+        if self.seconds <= 0 or not hasattr(signal, "SIGALRM"):
+            return self
+        self.previous = signal.getsignal(signal.SIGALRM)
+        def _raise_timeout(signum, frame):
+            raise TimeoutError(f"TTS chunk timed out after {self.seconds}s")
+        signal.signal(signal.SIGALRM, _raise_timeout)
+        signal.alarm(self.seconds)
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if self.seconds > 0 and hasattr(signal, "SIGALRM"):
+            signal.alarm(0)
+            if self.previous is not None:
+                signal.signal(signal.SIGALRM, self.previous)
+        return False
+
+
+def _export_atomic(audio, path):
+    path = Path(path)
+    tmp = path.with_name(path.name + ".tmp")
+    audio.export(tmp, format="wav")
+    os.replace(tmp, path)
+
+
 def generate_and_merge(subs, out_dir, ref_audio_path, ref_text, video_duration_s, args):
     from pydub import AudioSegment
 
@@ -170,10 +213,10 @@ def generate_and_merge(subs, out_dir, ref_audio_path, ref_text, video_duration_s
 
     if args.tts_engine == "none":
         report = []
-        report_path.write_text(json.dumps(report), encoding="utf-8")
-        report_meta_path.write_text(json.dumps({}), encoding="utf-8")
+        atomic_write_json(report_path, report)
+        atomic_write_json(report_meta_path, {})
         timeline = AudioSegment.silent(duration=int(round(video_duration_s * 1000)), frame_rate=24000)
-        timeline.export(merged_wav, format="wav")
+        _export_atomic(timeline, merged_wav)
         return str(merged_wav), report
 
     tts_hash = hashlib.sha256(
@@ -183,7 +226,7 @@ def generate_and_merge(subs, out_dir, ref_audio_path, ref_text, video_duration_s
         "tts_hash": tts_hash,
         "target_language": args.target_language,
         "tts_engine": args.tts_engine,
-        "tts_model": resolved_model,
+        "tts_model": _tts_model_identity(args.tts_engine, resolved_model),
         "ref_text_hash": hashlib.sha256(ref_text.encode("utf-8")).hexdigest(),
         "ref_audio_hash": hashlib.sha256(Path(ref_audio_path).read_bytes()).hexdigest(),
         "video_duration_ms": int(round(video_duration_s * 1000)),
@@ -201,11 +244,28 @@ def generate_and_merge(subs, out_dir, ref_audio_path, ref_text, video_duration_s
     video_ms = int(round(video_duration_s * 1000))
     timeline = AudioSegment.silent(duration=video_ms, frame_rate=24000)
     report = []
+    if partial_report_path.exists():
+        try:
+            cached_report = json.loads(partial_report_path.read_text(encoding="utf-8"))
+            if isinstance(cached_report, list):
+                report = cached_report
+        except Exception:
+            report = []
     engine = get_engine(args.tts_engine)
     cache_key = hashlib.sha256(
         json.dumps(expected_meta, ensure_ascii=False, sort_keys=True).encode("utf-8")
     ).hexdigest()[:12]
-
+    total_chunks = len(subs)
+    merge_status(
+        getattr(args, "status", Path(out_dir) / "status.json"),
+        "running",
+        "generating aligned tts",
+        stage="tts",
+        tts_done=sum(1 for x in report if isinstance(x, dict) and "error" not in x),
+        tts_total=total_chunks,
+        tts_cache_key=cache_key,
+        tts_model=expected_meta["tts_model"],
+    )
     for idx, sub in enumerate(subs):
         tts_text = _get_text(sub)
         target_ms = max(0, min(sub.end, video_ms) - max(sub.start, 0))
@@ -215,17 +275,27 @@ def generate_and_merge(subs, out_dir, ref_audio_path, ref_text, video_duration_s
         }
         if target_ms <= 0 or is_non_speech(tts_text):
             item["skipped"] = True
+            report = [x for x in report if not (isinstance(x, dict) and x.get("index") == idx)]
             report.append(item)
+            report.sort(key=lambda x: x.get("index", -1))
+            atomic_write_json(partial_report_path, report)
             continue
 
         chunk_wav = Path(out_dir) / f"chunk_{slug}_{engine_slug}_{cache_key}_{idx:04d}.wav"
         try:
-            engine.synthesize(
-                tts_text, ref_audio_path, ref_text, str(chunk_wav),
-                hf_offline=args.hf_offline,
-                target_language=args.target_language,
-                model_path=resolved_model,
-            )
+            if not (chunk_wav.exists() and chunk_wav.stat().st_size > 44):
+                tmp_chunk = chunk_wav.with_name(chunk_wav.name + ".tmp")
+                tmp_chunk.unlink(missing_ok=True)
+                with _ChunkTimeout(getattr(args, "qwen3_tts_chunk_timeout_sec", 180)):
+                    engine.synthesize(
+                        tts_text, ref_audio_path, ref_text, str(tmp_chunk),
+                        hf_offline=args.hf_offline,
+                        target_language=args.target_language,
+                        model_path=resolved_model,
+                        max_tokens=getattr(args, "qwen3_tts_max_tokens", 260),
+                        temperature=getattr(args, "qwen3_tts_temperature", 0.8),
+                    )
+                os.replace(tmp_chunk, chunk_wav)
             chunk_audio = AudioSegment.from_file(chunk_wav)
             item["raw_ms"] = len(chunk_audio)
             aligned, fit_stats = _fit_audio_to_duration(chunk_audio, target_ms, tmp_dir, args)
@@ -236,22 +306,34 @@ def generate_and_merge(subs, out_dir, ref_audio_path, ref_text, video_duration_s
                     f"chunk_{slug}_{engine_slug}_{cache_key}_{idx:04d}_aligned.wav"
                 )
                 try:
-                    aligned.export(aligned_path, format="wav")
+                    _export_atomic(aligned, aligned_path)
                     item["segment_path"] = str(aligned_path)
                 except Exception as exc:
                     item["segment_write_warning"] = repr(exc)
         except Exception as exc:
             item["error"] = repr(exc)
+        report = [x for x in report if not (isinstance(x, dict) and x.get("index") == idx)]
         report.append(item)
-        partial_report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        report.sort(key=lambda x: x.get("index", -1))
+        atomic_write_json(partial_report_path, report)
+        merge_status(
+            getattr(args, "status", Path(out_dir) / "status.json"),
+            "running",
+            "generating aligned tts",
+            stage="tts",
+            tts_done=sum(1 for x in report if isinstance(x, dict) and "error" not in x),
+            tts_total=total_chunks,
+            tts_last_index=idx,
+            tts_last_error=item.get("error"),
+            tts_last_atempo_ratio=item.get("atempo_ratio", 1.0),
+            tts_extreme_count=sum(1 for x in report if isinstance(x, dict) and x.get("speed_tier") == "extreme"),
+            tts_cache_key=cache_key,
+        )
 
-    timeline.export(merged_wav, format="wav")
-    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    report_meta_path.write_text(json.dumps(expected_meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    _export_atomic(timeline, merged_wav)
+    atomic_write_json(report_path, report)
+    atomic_write_json(report_meta_path, expected_meta)
     partial_report_path.unlink(missing_ok=True)
-    if args.no_segments:
-        for chunk_path in Path(out_dir).glob(f"chunk_{slug}_{engine_slug}_{cache_key}_*.wav"):
-            chunk_path.unlink(missing_ok=True)
     return str(merged_wav), report
 
 
@@ -291,5 +373,5 @@ def add_gap_audio(tts_audio, raw_audio, subs, out_dir, video_duration_s, args):
     if cursor < total_ms:
         gap_bed = gap_bed.overlay(original[cursor:total_ms].apply_gain(args.gap_audio_gain_db), position=cursor)
 
-    gap_bed.overlay(tts[:total_ms], position=0).export(out_path, format="wav")
+    _export_atomic(gap_bed.overlay(tts[:total_ms], position=0), out_path)
     return str(out_path)
