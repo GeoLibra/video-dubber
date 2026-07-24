@@ -3,6 +3,10 @@
 <p align="center"><a href="README.md">中文</a> | <b>English</b></p>
 
 <p align="center">
+  <img src="assets/readme/hero.svg" alt="Video Dubber pipeline: source video to ASR, translation, voice cloning, muxing, and verification" width="100%">
+</p>
+
+<p align="center">
   <a href="#"><img src="https://img.shields.io/badge/Dubbing-Supported-blue" alt="Dubbing"></a>
   <a href="#"><img src="https://img.shields.io/badge/Subtitle%20Translation-Multilingual-green" alt="Translation"></a>
   <a href="#"><img src="https://img.shields.io/badge/Voice%20Cloning-Supported-orange" alt="Voice Cloning"></a>

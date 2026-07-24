@@ -1,0 +1,60 @@
+<svg width="1200" height="520" viewBox="0 0 1200 520" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Video Dubber pipeline hero</title>
+  <desc id="desc">A GitHub-safe diagram showing a video dubbing pipeline from source video through ASR, translation, voice cloning, timeline fitting, muxing, and verification.</desc>
+  <rect width="1200" height="520" fill="#111827"/>
+  <path d="M0 420 C170 350 290 474 456 392 C641 301 760 393 940 310 C1051 259 1139 261 1200 278 V520 H0 Z" fill="#172554" opacity=".68"/>
+  <path d="M0 458 C177 404 311 508 470 432 C672 335 779 450 972 360 C1075 312 1144 321 1200 342 V520 H0 Z" fill="#0F766E" opacity=".45"/>
+  <g transform="translate(72 62)">
+    <text x="0" y="0" fill="#F8FAFC" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="58" font-weight="800">Video Dubber</text>
+    <text x="0" y="44" fill="#CBD5E1" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="20">Download, transcribe, translate, clone, align, mux, and verify video dubbing jobs.</text>
+    <g transform="translate(0 88)">
+      <rect x="0" y="0" width="162" height="34" rx="17" fill="#ECFEFF" opacity=".95"/>
+      <text x="20" y="23" fill="#155E75" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="14" font-weight="700">Qwen3-TTS</text>
+      <rect x="178" y="0" width="166" height="34" rx="17" fill="#F0FDF4" opacity=".95"/>
+      <text x="198" y="23" fill="#166534" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="14" font-weight="700">Whisper / Qwen ASR</text>
+      <rect x="360" y="0" width="148" height="34" rx="17" fill="#FFF7ED" opacity=".95"/>
+      <text x="380" y="23" fill="#9A3412" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif" font-size="14" font-weight="700">WeSpeaker</text>
+    </g>
+  </g>
+  <g transform="translate(72 218)" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif">
+    <g>
+      <rect width="135" height="94" rx="8" fill="#F8FAFC"/>
+      <text x="22" y="36" fill="#111827" font-size="18" font-weight="800">Source</text>
+      <text x="22" y="62" fill="#475569" font-size="13">URL or MP4</text>
+    </g>
+    <path d="M150 47 H207" stroke="#67E8F9" stroke-width="4" stroke-linecap="round"/>
+    <path d="M199 38 L211 47 L199 56" stroke="#67E8F9" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <g transform="translate(226 0)">
+      <rect width="135" height="94" rx="8" fill="#ECFEFF"/>
+      <text x="24" y="36" fill="#164E63" font-size="18" font-weight="800">ASR</text>
+      <text x="24" y="62" fill="#0E7490" font-size="13">SRT timeline</text>
+    </g>
+    <path d="M376 47 H433" stroke="#67E8F9" stroke-width="4" stroke-linecap="round"/>
+    <path d="M425 38 L437 47 L425 56" stroke="#67E8F9" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <g transform="translate(452 0)">
+      <rect width="135" height="94" rx="8" fill="#F0FDF4"/>
+      <text x="20" y="36" fill="#14532D" font-size="18" font-weight="800">Translate</text>
+      <text x="20" y="62" fill="#15803D" font-size="13">Context aware</text>
+    </g>
+    <path d="M602 47 H659" stroke="#67E8F9" stroke-width="4" stroke-linecap="round"/>
+    <path d="M651 38 L663 47 L651 56" stroke="#67E8F9" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <g transform="translate(678 0)">
+      <rect width="135" height="94" rx="8" fill="#FFFBEB"/>
+      <text x="25" y="36" fill="#78350F" font-size="18" font-weight="800">Voice</text>
+      <text x="25" y="62" fill="#B45309" font-size="13">Clone refs</text>
+    </g>
+    <path d="M828 47 H885" stroke="#67E8F9" stroke-width="4" stroke-linecap="round"/>
+    <path d="M877 38 L889 47 L877 56" stroke="#67E8F9" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <g transform="translate(904 0)">
+      <rect width="135" height="94" rx="8" fill="#FAE8FF"/>
+      <text x="28" y="36" fill="#701A75" font-size="18" font-weight="800">Verify</text>
+      <text x="28" y="62" fill="#A21CAF" font-size="13">JSON report</text>
+    </g>
+  </g>
+  <g transform="translate(72 374)" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif">
+    <rect x="0" y="0" width="480" height="54" rx="8" fill="#020617" opacity=".72"/>
+    <text x="20" y="34" fill="#E2E8F0" font-size="16">status.json + run.log keep long jobs resumable and observable</text>
+    <rect x="510" y="0" width="416" height="54" rx="8" fill="#020617" opacity=".72"/>
+    <text x="530" y="34" fill="#E2E8F0" font-size="16">timeline fitting preserves full sentence endings</text>
+  </g>
+</svg>

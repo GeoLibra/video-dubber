@@ -3,6 +3,10 @@
 <p align="center"><b>中文</b> | <a href="README_EN.md">English</a></p>
 
 <p align="center">
+  <img src="assets/readme/hero.svg" alt="Video Dubber 流水线：从源视频到 ASR、翻译、声音克隆、合成和验证" width="100%">
+</p>
+
+<p align="center">
   <a href="#"><img src="https://img.shields.io/badge/配音-支持-blue" alt="配音"></a>
   <a href="#"><img src="https://img.shields.io/badge/字幕翻译-多语言-green" alt="翻译"></a>
   <a href="#"><img src="https://img.shields.io/badge/声音克隆-支持-orange" alt="声音克隆"></a>
