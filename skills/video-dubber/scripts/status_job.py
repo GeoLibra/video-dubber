@@ -32,9 +32,10 @@ def main():
     heartbeat_stale = bool(last_seen_age is not None and last_seen_age > args.stale_sec)
     artifacts_recent = bool(artifact_age is not None and artifact_age <= args.stale_sec)
     alive = pid_alive(pid) if pid else False
-    stalled = bool(heartbeat_stale and not alive and not artifacts_recent)
     progress = read_progress(job)
-    structurally_stuck = progress.get("guardian_status") == "structurally_stuck"
+    guardian_status = progress.get("guardian_status", "healthy")
+    stalled = bool((heartbeat_stale or guardian_status == "launch_failed") and not alive and not artifacts_recent)
+    structurally_stuck = guardian_status == "structurally_stuck"
     payload = {
         "job_dir": str(job),
         "pid": int(pid) if pid and pid.isdigit() else pid,

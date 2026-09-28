@@ -141,6 +141,17 @@ def separate_audio(audio_path, out_dir, skip=False):
 
 def write_job_config(job_dir, args, config=None):
     from .lang import slug as lang_slug
+    from .job_runtime import atomic_write_json
+    path = Path(job_dir) / "job_config.json"
+    existing = {}
+    if path.is_file():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                existing = loaded
+        except Exception:
+            existing = {}
+
     payload = {
         "url": args.url,
         "input_video": args.input_video,
@@ -150,7 +161,9 @@ def write_job_config(job_dir, args, config=None):
         "target_slug": lang_slug(args.target_language),
         "subtitle_mode": args.subtitle_mode,
         "translation_model": args.translation_model,
+        "translation_style": getattr(args, "translation_style", "faithful"),
         "translation_workers": getattr(args, "translation_workers", 1),
+        "translation_batch_size": getattr(args, "translation_batch_size", existing.get("translation_batch_size", 25)),
         "terms_file": getattr(args, "terms_file", None),
         "translation_context": getattr(args, "translation_context", "auto"),
         "context_char_budget": getattr(args, "context_char_budget", 8000),
@@ -158,7 +171,11 @@ def write_job_config(job_dir, args, config=None):
         "timing_risk_estimator": getattr(args, "timing_risk_estimator", True),
         "allow_source_fallback": getattr(args, "allow_source_fallback", False),
         "model_config": args.model_config,
+        "asr_engine": getattr(args, "asr_engine", "auto"),
         "tts_engine": args.tts_engine,
+        "profile": getattr(args, "profile", None),
+        "env_file": getattr(args, "env_file", None),
+        "coordination_dir": getattr(args, "coordination_dir", existing.get("coordination_dir", None)),
         "qwen3_model": getattr(args, "qwen3_model", None),
         "ref_audio": args.ref_audio,
         "no_segments": args.no_segments,
@@ -179,6 +196,7 @@ def write_job_config(job_dir, args, config=None):
         "gap_audio_gain_db": args.gap_audio_gain_db,
         "gap_pad_ms": args.gap_pad_ms,
     }
-    path = Path(job_dir) / "job_config.json"
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    merged = dict(existing)
+    merged.update({k: v for k, v in payload.items() if v is not None or k not in merged})
+    atomic_write_json(path, merged)
     return str(path)

@@ -3,3 +3,6 @@
 docs
 skills/video-dubber/.agent
 __pycache__
+.agent
+.DS_Store
+output/

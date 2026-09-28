@@ -520,11 +520,17 @@ uv pip install -r requirements-f5-pytorch.txt  # PyTorch 后端
 
 续跑前先确认没有同一 job 的旧进程还在运行。若无法查看进程，就至少检查 chunk 数量和最终输出文件时间戳；避免两个 TTS 进程同时写同一目录。
 
-### 心跳监控（Heartbeat / Status Check）
+### 心跳监控与 3-Layer 守护架构（Heartbeat Watchdog）
 
-当前实现是“可恢复的状态监控 + 单 job guardian”，不是系统级 L0/L1 三层守护。
-长任务建议用 `scripts/start_detached_job.py` 启动；它会写 `job_pid.txt`，
-主流程会持续写 `pipeline_status.json`，TTS 每个 chunk 完成后也会落盘产物。
+系统采用工业级三层守护（3-Layer Watchdog）与批量并发门禁，实现长视频与批量视频的无人值守自愈：
+
+| 层级 | 形式 | 职责与触发条件 | 对应工具 |
+| :--- | :--- | :--- | :--- |
+| **L0（常驻兜底）** | 独立于任何用户 Session 的 Shell 守护 | L1 心跳停跳 > 2h $\to$ 触发紧急无头巡检并记录报警 | `scripts/l0_resident_guard.sh` |
+| **L1（计划调度）** | 系统定时任务（Crontab / Hourly） | 定时扫描所有 Job，查活并自动续跑挂死任务；**控制并发门禁消费队列** | `scripts/cron_sweep_jobs.py` |
+| **L2（业务执行）** | 各业务会话与后台进程 | 每次状态更新、产物落盘时刷新自身心跳时间戳与 PID | `run_pipeline.py` / `job_state.py` |
+
+长任务单任务可用 `scripts/start_detached_job.py` 启动；多视频批量使用 `scripts/batch_submit.py` 提交。
 
 每个 job 必须维护标准状态和日志：
 
@@ -547,7 +553,7 @@ Worker 只写自己的状态、日志和产物。Guardian 只允许执行三类�
 `liveness-check`、`resume`、`mark-structurally-stuck`；不得读取或修改字幕、翻译、
 TTS chunk 等业务数据。
 
-健康检查看三层：
+健康检查看三层信号：
 
 | 层 | 信号 | 当前实现 | 作用 |
 |----|------|----------|------|
@@ -561,13 +567,13 @@ TTS chunk 等业务数据。
 才判定 `stalled=true`。恢复使用同一 job 目录执行
 `scripts/resume_job.py --detached`；不要换 job 目录，不要删除 chunk。
 
-`scripts/watch_job.py --job-dir <job_dir>` 是单 job guardian，会定时查活并自动恢复。
-连续 stale 超过阈值后，写 `state/progress.json` 的
+- 单 Job 守护：`scripts/watch_job.py --job-dir <job_dir>` 定时查活并自动恢复（与 L1 共享协同根目录、调度锁与并发槽位，槽位占满时排队等待，避免突破全局 `--max-parallel`）。
+- 全局/批量 L1 守护：`scripts/cron_sweep_jobs.py --jobs-dir output --max-parallel 1`，由 Crontab 调度或带 `--daemon` 运行，支持并发排队消费与自愈。无论扫描根目录还是自定义子批次目录，均自动统筹至协同根目录（默认 `output` 或批次持久化配置）共享 `.sweep.lock` 与并发槽位，防止显存/统一内存打爆；亦支持 `--coordination-dir` 显式统筹或 `--per-batch-quota` 隔离独立配额。
+- 连续 stale 超过阈值后，写 `state/progress.json` 的
 `guardian_status=structurally_stuck` 并停止自动恢复，避免无限重启。
+- L0 兜底：`scripts/l0_resident_guard.sh` 监控 `.l1_heartbeat`，超过 2 小时未更新时强行触发无头应急巡检（应急巡检心跳独立落盘至 `heartbeat_emergency.json`，不掩盖 L1 计划巡检失活状态）。可通过 `scripts/install_l0_plist.sh`（或 `scripts/l0_resident_guard.sh --install-plist`）动态适配当前检出路径并注册为 macOS launchd 常驻服务。
 
 默认不按分钟向用户自然语言汇报，只在阶段完成、状态异常、需要恢复、或产物完成时汇报。
-后续若要升级成真正 L1/L0 系统级守护，应另加明确的 cron/launchctl/shell guard，
-不能在文档里假定已经存在。
 
 意外中断后可以继续：不要换 job 目录，不要删除阶段产物，使用同一条命令重跑。脚本会复用：
 - `raw_video.mp4` / `raw_audio.wav`

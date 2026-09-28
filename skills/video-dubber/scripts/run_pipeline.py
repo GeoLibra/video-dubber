@@ -37,10 +37,32 @@ from core.video_builder import synthesize_videos, synthesize_original_video
 from core.verifier import verify_outputs
 from core.costs import TaskMeter
 from core.job_runtime import merge_status, atomic_write_json
-from core.job_state import append_event, ensure_job_layout, update_progress
+from core.job_state import append_event, ensure_job_layout, read_progress, update_progress
 
 
 FFMPEG = shutil.which("ffmpeg") or "/opt/homebrew/bin/ffmpeg"
+
+STAGE_ORDER = {
+    "queued": 0,
+    "preflight": 10,
+    "download_formats": 15,
+    "download": 20,
+    "audio_separation": 30,
+    "asr": 40,
+    "reference": 50,
+    "translation": 60,
+    "original_subtitled_video": 70,
+    "tts": 80,
+    "synthesis": 90,
+    "verify": 100,
+    "completed": 110,
+}
+
+
+def stage_rank(stage: str | None) -> int:
+    if not stage:
+        return -1
+    return STAGE_ORDER.get(stage, 0)
 
 
 def log(msg, step=None):
@@ -51,14 +73,39 @@ def log(msg, step=None):
 def update_status(status_file, status, msg="", **extra):
     current = merge_status(status_file, status, msg, pid=os.getpid(), **extra)
     job_dir = Path(status_file).resolve().parent
-    update_progress(
-        job_dir,
-        status=status,
-        stage=extra.get("stage", current.get("stage")),
-        message=msg,
-        pid=os.getpid(),
-        pipeline_status=str(Path(status_file).resolve()),
-    )
+    new_stage = extra.get("stage", current.get("stage"))
+
+    prev_progress = read_progress(job_dir)
+    prev_max_stage = prev_progress.get("max_stage") or prev_progress.get("stage")
+    prev_rank = stage_rank(prev_max_stage)
+    new_rank = stage_rank(new_stage)
+
+    progress_updates = {
+        "status": status,
+        "stage": new_stage,
+        "message": msg,
+        "pid": os.getpid(),
+        "pipeline_status": str(Path(status_file).resolve()),
+    }
+
+    # Reset consecutive retry count and stale count when making new stage progress or completed
+    stage_advanced = False
+    if status == "completed":
+        stage_advanced = True
+        progress_updates["resume_count"] = 0
+        progress_updates["stale_count"] = 0
+        progress_updates["max_stage"] = "completed"
+        progress_updates["guardian_status"] = "healthy"
+    elif new_stage and new_stage != "error" and new_rank > prev_rank:
+        stage_advanced = True
+        progress_updates["resume_count"] = 0
+        progress_updates["stale_count"] = 0
+        progress_updates["max_stage"] = new_stage
+        progress_updates["guardian_status"] = "healthy"
+    elif prev_max_stage:
+        progress_updates["max_stage"] = prev_max_stage
+
+    update_progress(job_dir, **progress_updates)
     append_event(
         job_dir,
         "worker",
@@ -66,7 +113,9 @@ def update_status(status_file, status, msg="", **extra):
         "status_update",
         msg,
         status=status,
-        stage=extra.get("stage", current.get("stage")),
+        stage=new_stage,
+        stage_advanced=stage_advanced,
+        max_stage=progress_updates.get("max_stage"),
     )
     return current
 
@@ -104,9 +153,15 @@ def apply_translation_config(args, config):
     terms_file = translation.get("terms_file")
     if terms_file:
         terms_path = Path(terms_file).expanduser()
+        if not terms_path.is_absolute():
+            profile_path = getattr(args, "profile", None)
+            if profile_path:
+                candidate = Path(profile_path).expanduser().resolve().parent / terms_path
+                if candidate.is_file():
+                    terms_path = candidate
         if not terms_path.is_file():
             raise ValueError(f"translation.terms_file must exist and be a file: {terms_path}")
-        terms_file = str(terms_path)
+        terms_file = str(terms_path.resolve())
 
     args.terms_file = terms_file
     args.translation_context = context_mode

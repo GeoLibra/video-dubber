@@ -245,17 +245,69 @@ job_dir/
     heartbeat.jsonl
 ```
 
-事件日志统一为 JSONL：`{"ts":"...","source":"worker|guardian","level":"info|warn|error|decision","event":"...","detail":"..."}`。业务脚本只负责写自己的状态和产物；guardian 只允许做三件事：查活、恢复、标记结构性卡住，不读取或改写字幕、翻译和 TTS 产物。
+### 3-Layer 心跳看门狗与自动容灾（Heartbeat Watchdog）
 
-健康检查看三层信号：
+系统采用工业级三层互检看门狗体系，防止无人值守或后台长任务死锁/中断：
 
+| 层级 | 形式 | 职责与触发条件 | 对应脚本/工具 |
+| :--- | :--- | :--- | :--- |
+| **L0（常驻兜底层）** | 独立于任何用户 Session 的 Shell 守护 | L1 心跳停跳 > 2h $\to$ 触发紧急无头巡检并报警（独立心跳记录，不掩盖 L1 失活状态） | `scripts/l0_resident_guard.sh` |
+| **L1（计划巡检层）** | 持久化定时任务（Crontab / Hourly） | 定时扫描所有 Job，查活并自动续跑挂死任务；**控制并发消费队列** | `scripts/cron_sweep_jobs.py` |
+| **L2（业务执行层）** | 各业务会话与后台进程 | 每次状态更新、产物落盘时刷新自身心跳时间戳与 PID | `run_pipeline.py` / `job_state.py` |
+
+#### 单任务健康检查信号
 | 信号 | 文件/工具 | 用途 |
 | --- | --- | --- |
-| PID | `job_pid.txt` / `status_job.py` | 判断后台进程是否还活着 |
-| 心跳 | `pipeline_status.json` 修改时间 | 判断流程是否长时间没有阶段进度 |
-| 产物增长 | `chunk_*_qwen3tts_*.wav`、`output_*.mp4`、`merged_tts_*.wav` | 判断实际文件是否仍在增长 |
+| **PID** | `job_pid.txt` / `status_job.py` | 使用 POSIX 信号 0 确认后台工作进程是否存活 |
+| **心跳** | `pipeline_status.json` 修改时间 | 判断流程是否长时间停滞（超时判定为 stale） |
+| **产物增长** | `chunk_*_qwen3tts_*.wav`、`output_*.mp4` | 确认即使状态未刷新，音视频文件是否仍在持续产出 |
 
-如果 `status_job.py` 报 `stalled=true`，表示心跳已 stale、PID 不存在、且近期没有产物增长。可用同一 job 目录执行 `resume_job.py --detached` 续跑；也可以启动 `watch_job.py --job-dir <job_dir>` 让 guardian 定时检查并自动恢复。连续 stale 超过阈值后会写入 `state/progress.json` 的 `guardian_status=structurally_stuck`，停止自动续跑，避免无限重启。
+只有当「心跳 stale + PID 已死 + 无新产物」时，才判定任务为挂死（`stalled`）。单任务可通过 `watch_job.py` 守护（与全局 L1 共享协同根目录、调度锁与并发槽位，槽位占满时排队等待，不突破 `--max-parallel` 限额），全局批量可通过 L1 `cron_sweep_jobs.py` 统一调度。若连续 3 次重试仍无进展，将置为 `structurally_stuck` 停止自愈以避免死循环。
+
+---
+
+## 🗂️ 多视频批量处理与并发门禁（Batch Queue）
+
+ASR 与 TTS 模型（如 Qwen3-TTS）极度消耗显存 / Apple Silicon 统一内存。为防止同时启动多个视频导致系统 OOM 崩溃，系统提供了内置排队与并发控制：
+
+1. **提交批量任务**（支持多参数或 URL/路径文本列表）：
+   ```bash
+   # 传入多个视频或 URL
+   python skills/video-dubber/scripts/batch_submit.py \
+     --inputs video1.mp4 video2.mp4 https://example.com/v3.mp4 \
+     --target-language Chinese
+
+   # 或者从文件批量导入
+   python skills/video-dubber/scripts/batch_submit.py \
+     --list-file urls.txt \
+     --batch-dir output/my_batch \
+     --target-language Chinese
+   ```
+   所有任务将初始化为 `pending` 状态进入队列。
+
+2. **L1 定时调度与执行（默认限制并发为 1）**：
+   ```bash
+   # 单次扫描调度（启动可用槽位，自动续跑异常任务）
+   python skills/video-dubber/scripts/cron_sweep_jobs.py --jobs-dir output/my_batch --max-parallel 1
+
+   # 或作为常驻调度进程运行
+   python skills/video-dubber/scripts/cron_sweep_jobs.py --jobs-dir output --max-parallel 1 --daemon --interval-sec 60
+   ```
+
+   > [!NOTE]
+   > **全局并发门禁与跨批次协同锁（Unified Coordination）**：
+   > 无论扫描全局 `output` 还是特定批次（如 `output/my_batch` 或自定义路径 `clients/client_alpha`）：
+   > - **持久化协调元数据**：`batch_submit.py` 创建自定义批次时，会自动生成持久化协调配置（`batch_meta.json`、`.coordination_root` 及 `job_config.json` 中的 `coordination_dir`），默认绑定至共同父目录或指定的 `--coordination-dir`。
+   > - **独立协调目录与全局登记表**：若指定独立协调目录（如 `--coordination-dir /var/lock/video-dubber`，与任务物理路径不重合），系统会在协调目录中自动维护 `registered_batches.json` 登记表；各巡检进程即使管理分散在不同磁盘或目录的批次，也会汇聚统计全系统活跃任务，绝对不突破 `--max-parallel`。
+   > - **调度器默认统筹**：调度器扫描自定义批次（如 `client_alpha` 与 `client_beta`）时，默认读取持久化根目录并共享 `.sweep.lock` 排他锁与并发槽位计数，确保并发数绝对不会超出 `--max-parallel`（防止 MLX 模型内存叠加打爆机器）。
+   > - **未配置自定义目录的安全保障**：若扫描未配置协调根且在 `output` 外的孤立目录，调度器会以局部模式运行并明确提示，拒绝虚标执行全局限额；用户可显式传入 `--coordination-dir <path>` 统一协调。
+   > - 如需为特定批次分配完全独立的并发配额，可传 `--per-batch-quota`。
+
+3. **配置系统 Crontab（生产推荐）**：
+   ```bash
+   # 每 10 分钟或每小时自动巡检并拉起排队任务
+   */10 * * * * cd /path/to/video-dubber && python3 skills/video-dubber/scripts/cron_sweep_jobs.py >> output/cron.log 2>&1
+   ```
 
 ## 🎯 使用方式
 

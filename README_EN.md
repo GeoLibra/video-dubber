@@ -245,17 +245,68 @@ job_dir/
     heartbeat.jsonl
 ```
 
-Event logs use JSONL: `{"ts":"...","source":"worker|guardian","level":"info|warn|error|decision","event":"...","detail":"..."}`. The business worker only writes its own status and artifacts; the guardian is limited to three actions: liveness-check, resume, and mark structurally stuck. It does not read or modify subtitles, translations, or TTS artifacts.
+### 3-Layer Heartbeat Watchdog & Resilience
+The system uses an industrial-grade three-layer mutually checking watchdog architecture to prevent unattended stalls or lockups:
 
-Health checks use three signals:
+| Layer | Form | Role & Trigger | Tool / Script |
+| :--- | :--- | :--- | :--- |
+| **L0 (Resident Guard)** | Shell guard independent of user sessions | Heartbeat stale > 2h $\to$ triggers emergency headless patrol & alert (isolated emergency heartbeat, does not mask L1 health) | `scripts/l0_resident_guard.sh` |
+| **L1 (Scheduled Job)** | Periodic scheduled task (Crontab / Hourly) | Scans all jobs, checks liveness, auto-resumes stalled jobs; **manages batch concurrency queue** | `scripts/cron_sweep_jobs.py` |
+| **L2 (Business Loop)** | Business sessions & worker processes | Flushes status, PID, and artifact timestamps on every stage/chunk | `run_pipeline.py` / `job_state.py` |
 
+#### Single-Job Health Signals
 | Signal | File / tool | Purpose |
 | --- | --- | --- |
-| PID | `job_pid.txt` / `status_job.py` | Check whether the background process is still alive |
-| Heartbeat | `pipeline_status.json` modification time | Detect whether the pipeline has stopped making stage progress |
-| Artifact growth | `chunk_*_qwen3tts_*.wav`, `output_*.mp4`, `merged_tts_*.wav` | Check whether output files are still being produced |
+| **PID** | `job_pid.txt` / `status_job.py` | Uses POSIX signal 0 to verify worker process existence |
+| **Heartbeat** | `pipeline_status.json` modification time | Detects whether the pipeline has stopped making progress |
+| **Artifact growth** | `chunk_*_qwen3tts_*.wav`, `output_*.mp4` | Checks whether output media files are continuously generated |
 
-If `status_job.py` reports `stalled=true`, the heartbeat is stale, the PID is gone, and no artifacts were produced recently. Resume in the same job directory with `resume_job.py --detached`, or start `watch_job.py --job-dir <job_dir>` so the guardian checks periodically and resumes automatically. After repeated stale checks, `state/progress.json` is marked with `guardian_status=structurally_stuck` and automatic resumes stop.
+A job is only judged `stalled` when "heartbeat is stale + PID is dead + no recent artifacts". Single jobs can be watched via `watch_job.py` (shares coordination root, lock, and concurrency slots with L1 to prevent exceeding `--max-parallel`), while batch jobs are swept by L1 `cron_sweep_jobs.py`. After 3 consecutive failed retries, it is marked `structurally_stuck` to avoid infinite restarts.
+
+---
+
+## 🗂️ Multi-Video Batch Processing & Concurrency Gate
+
+ASR and TTS models (such as Qwen3-TTS) are heavy on GPU memory / Apple Silicon unified memory. Running multiple jobs simultaneously can easily cause Out-Of-Memory (OOM) crashes. The system provides built-in queueing and concurrency control:
+
+1. **Submit Batch Jobs**:
+   ```bash
+   # Pass multiple files or URLs
+   python skills/video-dubber/scripts/batch_submit.py \
+     --inputs video1.mp4 video2.mp4 https://example.com/v3.mp4 \
+     --target-language Chinese
+
+   # Or import from a text file (one URL/path per line)
+   python skills/video-dubber/scripts/batch_submit.py \
+     --list-file urls.txt \
+     --batch-dir output/my_batch \
+     --target-language Chinese
+   ```
+   All jobs are queued with `status: pending`.
+
+2. **L1 Scheduled Sweeping & Dispatch (Default max_parallel=1)**:
+   ```bash
+   # One-shot sweep (starts available slots, resumes stalled jobs)
+   python skills/video-dubber/scripts/cron_sweep_jobs.py --jobs-dir output/my_batch --max-parallel 1
+
+   # Or run as a continuous daemon
+   python skills/video-dubber/scripts/cron_sweep_jobs.py --jobs-dir output --max-parallel 1 --daemon --interval-sec 60
+   ```
+
+   > [!NOTE]
+   > **Global Concurrency Gate & Cross-Batch Coordination**:
+   > Regardless of whether scanning the root `output` directory or specific batches (e.g. `output/my_batch` or custom paths like `clients/client_alpha`):
+   > - **Persistent Coordination Metadata**: `batch_submit.py` automatically writes coordination configuration (`batch_meta.json`, `.coordination_root`, and `coordination_dir` in `job_config.json`), binding custom batches to their shared parent directory or explicit `--coordination-dir`.
+   > - **Independent Coordination Directory & Global Registry**: If using an independent lock directory (e.g. `--coordination-dir /var/lock/video-dubber` disjoint from batch paths), the system maintains a `registered_batches.json` registry file in the coordination directory. Sweep processes across different disks or trees discover all active jobs across all registered batches, strictly observing `--max-parallel`.
+   > - **Scheduler Defaults**: Schedulers scanning custom batches (e.g. `client_alpha` and `client_beta`) default to this persistent coordination root, sharing `.sweep.lock` and global concurrency accounting so active jobs never exceed `--max-parallel`.
+   > - **Unconfigured Directory Safety**: Scanning an unconfigured custom directory outside `output` runs with local scope and explicitly warns/refuses to claim global limit enforcement unless `--coordination-dir <path>` is provided.
+   > - Use `--per-batch-quota` if you explicitly want isolated per-batch concurrency quotas instead of global enforcement.
+
+3. **Configure System Crontab (Recommended for production)**:
+   ```bash
+   # Sweep every 10 minutes or hourly
+   */10 * * * * cd /path/to/video-dubber && python3 skills/video-dubber/scripts/cron_sweep_jobs.py >> output/cron.log 2>&1
+   ```
 
 ---
 
